@@ -1,0 +1,27 @@
+proc easyDisplacement()
+{
+
+ string $readSelection[] = `ls -sl`;
+ string $currentSelection = "";
+ int $readSelectionSize = (size($readSelection));
+ int $i = 0;
+ int $j = 0;
+
+ while($i < $readSelectionSize)
+ {
+      print "working 1 \n";
+      $currentSelection = $readSelection[$i];
+      print ($currentSelection + "\n");
+      print "working 2 \n";
+      int $objectVerts[] = `polyEvaluate -v`;
+      while($j < $objectVerts[0])
+       {
+            eval(("select -r " + $currentSelection + ".vtx["+$j+"]"));
+            
+            //move -r 0 (sin($j)) 0;
+            $j++;
+       }//end j loop
+       $j = 0;
+       $i ++;
+ }//end i loop
+}//end proc

@@ -1,0 +1,11 @@
+proc ObjectCount()
+{
+  string $readSelection[] = `ls -sl`;
+  if (size($readSelection) == 0)
+  {
+     error "Select at least one PolygonMesh";
+  }
+  print (size($readSelection));
+}
+ObjectCount;
+

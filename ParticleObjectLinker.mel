@@ -1,0 +1,62 @@
+proc string[] getSelection()
+{
+     string $selArray[] = `ls -sl`;
+     return $selArray;
+     if (size($selArray) == 0)
+        {
+            error "Select at least one object";
+        }//if
+}//proc
+
+proc ParticleObjectLinker()//int $objectlinking)
+{
+     global int $dyn = 1;
+     string $ParticleCreation = "particle ";
+     string $p = " -p ";
+     string $listArray[] = `getSelection`;
+     float  $particlePosition[2];
+     int $selectionSize = (size($listArray));
+     float $X;
+     float $Y;
+     float $Z;
+     
+     //Loop finds objects cener point stores coordinates in $ParticleCreation
+     for($i = 0; $i < $selectionSize; $i++)
+     {
+            $X = `objectCenter -gl -x $listArray[$i]`;
+            $Y = `objectCenter -gl -y $listArray[$i]`;
+            $Z = `objectCenter -gl -z $listArray[$i]`;
+            $ParticleCreation = ($ParticleCreation + "-p " + $X + " " + " " + $Y + " " + $Z);
+     }//loop
+
+     //Complete $ParticleCreation and evaluate the string
+     $ParticleCreation = ($ParticleCreation + " -c 1 -n \"ParticleLinked\"");
+     eval($ParticleCreation);
+     
+     //Adjust Objects Coordinates to properly meet up with particle Coordinates
+     for($i = 0; $i < $selectionSize; $i++)
+     {
+            $particlePosition = `pointPosition -l ParticleLinked.pt[$i]`;
+            select -r $listArray[$i];
+            move -r (-1*$particlePosition[0])  (-1*$particlePosition[1]) (-1*$particlePosition[2]);
+            makeIdentity -apply true -t 1 -r 0 -s 0 -n 0;
+            move -r $particlePosition[0]  $particlePosition[1] $particlePosition[2];
+     }//loop
+
+     //Optional loop For particle
+     for($i = 0; $i < $selectionSize; $i++)
+     {
+            string $Ppart1 =("float $particlePosition"+$i+"[2] = `pointPosition -w ParticleLinked.pt["+ $i +"]`;");
+            string $Ppart2 =("\n if($dyn == 1){"+ $listArray[$i]+ ".tx = $particlePosition"+$i+"["+0+"];");
+            string $Ppart3 =("\n"+ $listArray[$i]+ ".ty = $particlePosition"+$i+"["+1+"];");
+            string $Ppart4 =("\n"+ $listArray[$i]+ ".tz = $particlePosition"+$i+"["+2+"];}");
+
+            string $Vpart1 = ("float $partVelocity[5] = `getParticleAttr -at velocity ParticleLinked.pt["+$i+"]`;");
+            string $Vpart2 = ("\n"+ $listArray[$i] +".rx = (("+ $listArray[$i] +".tx * "+ $listArray[$i] +".tx) *.725) *($partVelocity[0] * 0.95);");
+            string $Vpart3 = ("\n"+ $listArray[$i] +".ry = (("+ $listArray[$i] +".ty * "+ $listArray[$i] +".ty) *.725) *($partVelocity[1] * 0.95);");
+            string $Vpart4 = ("\n"+ $listArray[$i] +".rz = (("+ $listArray[$i] +".tz * "+ $listArray[$i] +".tz) *.725) *($partVelocity[2] * 0.95);");
+            //if($objectlinking == 1){
+            expression -s ($Ppart1 + $Ppart2 + $Ppart3 + $Ppart4);
+            expression -s ($Vpart1 + $Vpart2 + $Vpart3 + $Vpart4);
+    }//loop
+}//proc

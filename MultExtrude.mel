@@ -1,0 +1,41 @@
+//Author: Steve Eisenmann
+//Title: MultiExtrude
+//Description: This tool creates Surfaces from multi peice selections
+//Date: 4/10/07
+//version: 1.02
+global proc MultiExtrude()
+{
+	string $ExtrudeArray[] = `ls -sl`;
+
+	if (size($ExtrudeArray) == 0) {
+ 	error "Select at least one Nurbs Curve";
+ 	}
+
+	string $oldName[] = `ls -sl`;
+
+	int $ExArSz = (size($ExtrudeArray));
+
+	for ($j = 0; $j <= $ExArSz; $j++)
+		{
+
+	/*	select -r $ExtrudeArray[$j];
+		bevelPlus
+		-constructionHistory true
+		-normalsOutwards true
+		-range false
+		-polygon 1
+		-tolerance 0.01
+		-numberOfSides 1
+		-js false
+		-width 0.1
+		-depth 0.1
+		-extrudeDepth 0.1
+		-capSides 2 -outerStyle 0
+		-innerStyle 0 -polyOutMethod 0
+		-polyOutCount 200 -polyOutExtrusionType 3
+		-polyOutExtrusionSamples 1 -polyOutCurveType 3
+		-polyOutCurveSamples 6
+		-polyOutUseChordHeightRatio 0  */
+		planarSrf -ch 1 -d 3 -ko 0 -tol 0 -rn 0 -po 0 ($ExtrudeArray[$j]);
+		}
+}

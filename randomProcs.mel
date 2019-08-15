@@ -1,0 +1,60 @@
+proc float randTransition(float $randMinX, float $randMaxX, float $randMinY, float $randMaxY,float $randMinZ, float $randMaxZ, string $Selection)
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rTx = getRand($randMinX, $randMaxX);
+            float $rTy = getRand($randMinY, $randMaxY);
+            float $rTz = getRand($randMinZ, $randMaxZ);
+
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            move -r $rTx $rTy $rTz;
+
+         }//loop
+     return 0;
+}//proc
+
+
+proc float randRotation(float $randMinRX, float $randMaxRX, float $randMinRY, float $randMaxRY,float $randMinRZ, float $randMaxRZ,string $Selection)
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rRx = getRand($randMinRX, $randMaxRX);
+            float $rRy = getRand($randMinRY, $randMaxRY);
+            float $rRz = getRand($randMinRZ, $randMaxRZ);
+
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            rotate -r $rRx $rRy $rRz;
+
+         }//loop
+     return 0;
+}//proc
+
+proc float randScale(float $randMinSX, float $randMaxSX, float $randMinSY, float $randMaxSY,float $randMinSZ, float $randMaxSZ,string $Selection)//, string $originalSelection[])
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rSx = getRand($randMinSX, $randMaxSX);
+            float $rSy = getRand($randMinSY, $randMaxSY);
+            float $rSz = getRand($randMinSZ, $randMaxSZ);
+
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            scale -r $rSx $rSy $rSz;
+
+         }//loop
+     return 0;
+}//proc

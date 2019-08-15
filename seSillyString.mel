@@ -1,0 +1,106 @@
+
+
+
+proc seSillyString(int $degree, int $vertSkip)
+{
+     int    $j        = 0;
+     int    $i        = 0;
+     int    $loopjump = 0;
+     int    $total    = 0;
+     float  $ux       = 0;
+     float  $uy       = 0;
+     float  $uz       = 0;
+     string $kCount   = "";
+     string $extend   = "";
+     string $kFront   = "";
+     string $kEnd     = "";
+     string $finalize = "";
+     
+     string $readSelection[] = `ls -sl`;
+     if (size($readSelection) == 0)
+     {
+        error "Select at least one PolygonMesh";
+     }
+
+     int $readSelectionSize = (size($readSelection));
+    // while($i <= $readSelectionSize)
+    // {
+
+        int $vertCount[] = `polyEvaluate -v`;
+        $total = $vertCount[0];
+        while($i < $vertCount[0])
+        {
+         float $vertCord[] = `pointPosition -w ($readSelection[$i]+".vtx["+$i+"]")`;
+
+         $ux = $vertCord[0];
+         $uy = $vertCord[1];
+         $uz = $vertCord[2];
+         $extend = ($extend + "-p " + $ux + " " + $uy + " " + $uz + " ");
+         $loopJump = `rand 1 $vertSkip`;
+         $i = $i + $loopJump;
+         $j++;
+       }
+       print("i = "+$i+ " j = "+$j+"\n");
+     //From here down is just to create properly formatted strings
+     //to create the curves command with degree levels as high as
+     //Maya will allow :D
+     if($degree == 1)
+if($degree == 1)
+     {
+          $i = 0;
+          while($i < $j)
+          {
+               $kCount = ($kCount + "-k " + $i + " ");
+               $i++;
+          }
+
+     }
+
+     if($degree > 1)
+     {
+          $i = 1;
+          while($i < ($j - $degree))
+          {
+               $kCount = ($kCount + "-k " + $i + " ");
+               $i++;
+          }
+     }
+     $i = 0;
+     while($i < ($degree))
+     {
+
+          $kFront = ($kFront + " -k 0 ");
+          if($j < $degree)
+          {
+                $kEnd   = ($kEnd   + " -k 1 ");
+          }
+          if($j > $degree)
+          {
+                $kEnd   = ($kEnd   + " -k "+ ($j - $degree));
+          }
+          $i++;
+     }
+
+     if($j <= $degree && $j > 1)
+     {
+          $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kEnd);
+     }
+
+     if($j > $degree)
+     {
+          $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kCount + $kEnd);
+     }
+
+     if($degree == 1)
+     {
+          $finalize = ("curve -d "+ $degree +" "+ $extend +" " + $kCount);
+     }
+     //print ($finalize);
+     eval ($finalize);
+     // This just adds the geometry from the constructed curve nothing new here
+     string $selection[] = `ls -sl`;
+     circle -ch on -o on -nr 0 1 0 -r 0.05 -n "torusCircle";
+     extrude -ch true -rn false -po 0 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 "torusCircle" $selection[0];
+}
+
+seSillyString 3 10;

@@ -1,0 +1,46 @@
+//Author: Steve Eisenmann
+//Title: RandomColor
+//Description: This tool creates random colors and applies them to multi peice selections
+//Date: 4/10/07
+//version: 1.01
+
+global proc RandomColor()
+{
+	string $ColorArray[] = `ls -sl`;
+
+	if (size($ColorArray) == 0) {
+ 	error "Select at least one Renderable Object";
+ 	}
+	
+	int $colorArraySize = (size($ColorArray));
+
+	for ($j = 0; $j <= $colorArraySize; $j++)
+		{ 
+		float $R = `rand 0 1`;
+		float $G = `rand 0 1`;
+		float $B = `rand 0 1`;
+		string $name = ("L" + $j);
+		
+		//Randomly SG node names turn off line above this if your going to use these
+		/*
+		int $rand  = `rand 1 100000`;
+		int $rand2 = `rand 1 100`;
+		string $name = ("L" + $rand);
+		string $nameTest = ("L" + $rand + "SG");
+		if (`exists $nameTest`) {
+			$name = ("L" + ($rand + $rand2));
+		}
+		*/
+		
+		//Create New Lambert Shader
+		shadingNode -n $name -asShader lambert;
+		sets -renderable true -noSurfaceShader true -empty -name ($name + "SG");
+		connectAttr -f ($name + ".outColor") ($name + "SG.surfaceShader");
+
+		//Sets Basic shader values
+		setAttr ( $name+".color") -type double3 $R $G $B ;
+		select -r $ColorArray[$j];
+
+		sets -e -forceElement ($name + "SG");
+	}
+}

@@ -1,0 +1,45 @@
+proc sePopulateObject(int $vertSkip)
+{
+  string $readSelection[] = `ls -sl`;
+  if (size($readSelection) == 0)
+  {
+     error "Select at least one PolygonMesh";
+  }
+  print (size($readSelection));
+  int $readSelectionSize = (size($readSelection));
+  int    $i = 0;
+  int    $j = 0;
+  int    $loopjump = 0;
+  int    $randSelection = 0;
+  //float  $vertCord[3];
+
+  //while($i <= ($readSelectionSize - 2))
+  //while($i <= ($readSelectionSize - 2))
+  //{
+
+     int $vertCount[] = `polyEvaluate -v`;
+     $loopJump = `rand 1 (abs($vertSkip))`;
+     while($j <= $vertCount[0])
+     {
+
+       float $vertCord[] = `pointPosition -w ($readSelection[$i]+".vtx["+$j+"]")`;
+
+       //select -r $readSelection[($readSelectionSize-1)];
+       $randSelection = `rand 1 $readSelectionSize`;
+       print $randSelection;
+      // select -r $readSelection[($readSelectionSize-1)];
+       select -r $readSelection[($randSelection)];
+       duplicate -rr;
+       xform -t $vertCord[0] $vertCord[1] $vertCord[2];
+       $loopJump = `rand 1 $vertSkip`;
+       $j = $j + $loopJump;
+     }
+
+
+     $j = 0;
+     ++$i;
+  //}
+
+}
+sePopulateObject 10;
+

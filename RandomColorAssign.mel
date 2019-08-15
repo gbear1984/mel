@@ -1,0 +1,31 @@
+//Author: Steve Eisenmann
+//Title: RandomColor
+//Description: This tool creates random colors and applies them to multi peice selections
+//Date: 4/10/07
+//version: 1.01
+
+global proc RandomColorAssign(string $name, float $R, float $G, float $B)
+{
+ //       source "C:/Documents and //Settings/Administrator/Desktop/MultiExtrude.mel";
+	string $ColorArray[] = `ls -sl`;
+
+	if (size($ColorArray) == 0) {
+ 	error "Select at least one Renderable Object";
+ 	}
+	
+	int $colorArraySize = (size($ColorArray));
+	int $randSelect = 0;
+	shadingNode -n $name -asShader lambert;
+	sets -renderable true -noSurfaceShader true -empty -name ($name + "SG");
+	connectAttr -f ($name + ".outColor") ($name + "SG.surfaceShader");
+	setAttr ( $name+".color") -type double3 $R $G $B ;
+	for ($j = 0; $j <= $colorArraySize; $j++)
+		{ 
+                  $randSelect = `rand 0 4`;
+
+                  if($randSelect > 2)
+		  select -r $ColorArray[$j];
+		  sets -e -forceElement ($name + "SG");
+	}
+}
+RandomColorAssign greenShader1 .35 .325 .13

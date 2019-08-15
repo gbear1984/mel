@@ -1,0 +1,707 @@
+/*//////////////////////////////////////////////////////////////////////////////////////////////////
+
+                                           Tool Info
+
+Steve's Cloud Tools: Tool used to create a particle volume from coordinates of selected objects
+Copyright (C) 2009  Steve Eisenmann
+Date:         02.08.09
+Version:      1.0
+Discription:  This tool is for controlled Geometry & Particle creation
+              ideal uses are for creating cloud structures
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+                                        Version History
+Steve's CouldTools
+version 1.0  crude GUI Added along with some work flow improvements
+
+CloudGen
+version 0.7a Optimised Code greatly improved speed
+Version 0.6a Procs AutoVolume added
+             added new proc for converting SA to rad and rad to SA;
+             procs optimised
+Version 0.5a all no release; debugging statement left in, barebone option no GUI
+
+CloudTools
+version 0.7a Optimised Code greatly improved speed
+Version 0.6a Procs AutoVolume added
+             added new proc for converting SA to rad and rad to SA;
+             procs optimised
+Version 0.5a all no release; debugging statement left in, barebone option no GUI
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Users         If you have ideas for this tool that you would like to see added, or if you have found
+              a bug in the script please e-mail me at: eisenman@itg.uiuc.edu
+
+              if you like this tool and would like to download others I have written please visit my
+              my website @ steve-eisenmann.com
+
+              If you update my script and release a new version please add your info under mine in
+              the (aboutStevesRandomWindow global proc) Also please send me a copy of it.
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+                                            Disclaimer
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+If you would like a copy of the General Public License, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.                                                                                               //
+
+Author is not responseable for and damage to your computer or files
+
+//////////////////////////////////////////////////////////////////////////////////////////////////*/
+// None Global Proc
+// Calculates the average distance between center of object and min and max bounds
+proc float sphereSurfaceArea()
+{
+     float $bBox[] = `exactWorldBoundingBox`;
+     float $oCenter[] = `objectCenter -gl`;
+     float $pi = 3.14159265;
+     $dXYZ  = distance2D($oCenter[0],   $bBox[0],$oCenter[1],$oCenter[1],"cXbX cYcY = ");
+     $dXZY  = distance2D($oCenter[1],   $bBox[1],$oCenter[2],$oCenter[2],"cYbY cZcZ = ");
+     $dYZX  = distance2D(   $bBox[1],$oCenter[1],   $bBox[2],$oCenter[2],"cZbZ cXcX = ");
+     float $average = (($dXYZ+$dXZY+$dYZX)/3);
+     float $surfaceArea = (4*$pi*($average*$average));
+     //print ("average = "+$average+"\n");
+     return $surfaceArea;
+} // end sphereSurfaceArea
+
+proc float surfaceArea2Rad(float $surfaceArea)
+{
+     float $pi     = 3.14159265;
+     float $radius = sqrt($surfaceArea/(4*$pi));
+     return $radius;
+} // end surfaceArea2Rad
+// Calculates the average distance between center of object and min and max bounds
+
+
+proc float objectRadius(int $distanceType)
+{
+     float $bBox[]    = `exactWorldBoundingBox`;
+     float $oCenter[] = `objectCenter -gl`;
+     float $dXYZ      = 0.0;
+     float $dXZY      = 0.0;
+     float $dYZX      = 0.0;
+
+     if ($distanceType < 1)
+     {
+        $dXYZ  = distance2D($oCenter[0],   $bBox[0],$oCenter[1],$oCenter[1],"cXbX cYcY = ");
+        $dXZY  = distance2D($oCenter[1],   $bBox[1],$oCenter[2],$oCenter[2],"cYbY cZcZ = ");
+        $dYZX  = distance2D(   $bBox[1],$oCenter[1],   $bBox[2],$oCenter[2],"cZbZ cXcX = ");
+     }
+     if ($distanceType >= 1)
+     {
+        $dXYZ  = distance3D($bBox[0],$oCenter[0],$bBox[1],$oCenter[1],$bBox[2],$oCenter[2],"dXYZ  = ");
+        $dXZY  = distance3D($bBox[0],$oCenter[0],$bBox[2],$oCenter[2],$bBox[1],$oCenter[1],"dXZY  = ");
+        $dYZX  = distance3D($bBox[1],$oCenter[1],$bBox[2],$oCenter[2],$bBox[2],$oCenter[2],"dYZX  = ");
+
+     }
+     float $average = (($dXYZ+$dXZY+$dYZX)/3);
+     return $average;
+
+} // end objectRadius
+
+// 3d distance calculator
+proc float distance3D(float $x1,float $x2,float $y1,float $y2,float $z1, float $z2, string $name)
+{
+     float $x = $x2-$x1;
+     float $y = $y2-$y1;
+     float $z = $z2-$z1;
+     float $distance = sqrt(($x*$x)+($y*$y)+($z*$z));
+     //print ("x "+$x+" y "+$y+" z "+$z+"\n");
+     //print ($name+$distance+"\n");
+     return $distance;
+}// end distance
+proc float distance2D(float $x1,float $x2,float $y1,float $y2, string $name)
+{
+     float $x = $x2-$x1;
+     float $y = $y2-$y1;
+     float $distance = sqrt(($x*$x)+($y*$y));
+     //print ("x "+$x+" y "+$y+" z "+$z+"\n");
+     //print ($name+$distance+"\n");
+     return $distance;
+}// end distance
+
+global proc cloudTool(float $min, float $max, int $vertSkip, int $deleteOriginal)
+{
+        string $selectionArray[]     = `ls -sl`;
+        float  $uMin                 = $min;
+        float  $uMax                 = $max;
+        float  $rand                 = `rand $min $max`;
+        float  $pi                   = 3.14159265;
+	float  $autoMin              = 0.0;
+        float  $autoMax              = 1.0;
+	float  $maxSurfaceArea       = 1.0;
+        float  $multiplier           = 1.0;
+        float  $multiplier2          = 1.0;
+        float  $vertX                = 0.0;
+	float  $vertY                = 0.0;
+	float  $vertZ                = 0.0;
+	float  $objectVolume         = 0.0;
+	float  $averageRadius        = 0.0;
+	float  $maxRad               = 0.0;
+	float  $minRad               = 0.0;
+	float  $swap1                = 0.0;
+	int    $arraySelectionSize   = (size($selectionArray));
+        int    $j                    = 0;
+        int    $f                    = 0;
+        int    $i                    = 0;
+        int    $loopJump             = 0;
+        $vertSkip = abs($vertSkip);
+        $loopJump = `rand 1 $vertSkip`;
+        if (size($selectionArray) == 0) {
+ 	error "Select at least one PolygonMesh";
+ 	}
+ 	//if( $vertSkip <= 0);
+ 	//{
+          //$vertSkip = 1;
+        //}
+        print ("vertSkip "+$vertSkip+"\n");
+        while($j < $arraySelectionSize)
+                {
+                   select -r $selectionArray[$j];
+                   $swap1 = objectRadius(0);
+                   if($maxRad < $swap1)// || $minRad > $swap1 )
+                   {
+                       $maxRad = $swap1;
+                       //$minRad = $swap1;
+                   }
+                   $j++;
+                }
+        $j = 0;
+	while($j < $arraySelectionSize)
+		{
+		     select -r $selectionArray[$j];
+		     $objectSurfaceArea = sphereSurfaceArea();
+		     $averageRadius     = objectRadius(0);
+		     int $verts[0]      = `polyEvaluate -v`;
+ 	             $autoMin           = abs(($vertSkip/$verts[0]) - .5);
+                     $autoMax           = ($vertSkip/$verts[0])+1.0;
+	             $maxSurfaceArea    = ((4*$pi)*($maxRad*$maxRad));
+                     $multiplier        = (1-((1/$maxSurfaceArea)* $objectSurfaceArea)*1);
+                     $multiplier2       = ((1 - $multiplier) + 0.05);
+		     while ($f < $verts[0])
+                     {
+                           $loopJump = `rand 1 $vertSkip`;
+                           float $vertPArray[] = `pointPosition ($selectionArray[$j]+".vtx["+$f+"]\n")`;
+                           $vertX = $vertPArray[0];
+  	                   $vertY = $vertPArray[1];
+	                   $vertZ = $vertPArray[2];
+	                   //createPuff($maxRad,$averageRadius, $objectSurfaceArea, $vertX, $vertY, $vertZ, $min, $max,$verts[0], $f, $arraySelectionSize, $vertSkip);
+		                   if($min == 0 && $max == 0)
+                                   {
+                                        $rand = `rand $autoMin $autoMax`;
+                                        float $rad     = (((($multiplier + $multiplier2)/2) * surfaceArea2Rad( $objectSurfaceArea))*$rand);
+                                        polySphere -r $rad -sx 8 -sy 8 -ax 0 1 0 -cuv 2 -ch 1 -n ("cloudBall"+($j*$f));
+                                        move $vertX $vertY $vertZ;
+                                   //print("min "+ $autoMin + " max "+$autoMax+"\n");
+                                   }
+                                   else if ($min =! 0 && $max =! 0)
+                                   {
+                                        $rand                 = `rand $uMin $uMax`;
+                                        float $rad     = (( $objectSurfaceArea/$verts[0])*$rand);
+       	                                polySphere -r $rad -sx 8 -sy 8 -ax 0 1 0 -cuv 2 -ch 1 -n ("cloudBall"+($j*$f));
+                                        move $vertX $vertY $vertZ;
+                                   //print("min "+ $autoMin + " max "+$autoMax+"\n");
+                                   }
+                           $f = $f+$loopJump;
+
+                      }
+		      $f = 0;
+        	      $j++;
+                  }
+        $j = 0;//reset $i for next series
+        if ( $deleteOriginal == 1 )
+        {
+            while( $j < $arraySelectionSize )
+            {
+                   select -r $selectionArray[$j];
+                   doDelete;
+                   $j++;
+            }
+        }
+
+}
+
+// None Global Proc
+//main proc
+global proc cloudGen(int $userParticleGroups, float $sizeMultiplier)
+{
+	string $objectArray[]           = `ls -sl`;
+	string $evalArray[]             =  {};//Used to create Multiple sets of instructions with particle tool; Sent to creatCloud
+        string $createCloud             =  "";//string built to contain instructions for particle tool; Sent to creatCloud
+        string $evalStatement           =  "";//recives information from $createCloud and is evaluated
+        float  $pX                      = 0.0;//current selected items in $objectArray center
+        float  $pY                      = 0.0;//current selected items in $objectArray center
+        float  $pZ                      = 0.0;//current selected items in $objectArray center
+        float  $particlesPerObject      = 0.0;//equals current Object radiusSize * $sizeMultiplier Var is used in $createCloud
+        float  $radiusArrayTotal        = 0.0;//Total added value of BBox Radius Array
+        float  $radiusArrayAverage      = 0.0;//Average value of BBox Radius Array
+        float  $floorRadiusArrayAverage = 0.0;//Average value of BBox Radius Array rounded to nearest small whole #
+        float  $ceilRadiusArrayAverage  = 0.0;//Average value of BBox Radius Array rounded to nearest Large whole #
+        float  $maxRadiusValue          = 0.0;//Largest Radius in BBox Array
+        float  $minRadiusValue          = 0.0;//Smallest Radius in BBox Array
+        float  $radiusSize[]            =  {};//Array that stores averaged BBox Radius
+        float  $objectGroupIncrement    = 0.0;//This value is used to determine the size of a user define group
+        float  $swap1                   = 0.0;//temp data var1
+        float  $swap2                   = 0.0;//temp data var2
+        float  $sMin                    = 0.00000001;
+        int    $objectArraySize         = (size($objectArray));//set to intial selection array size
+        int    $g                       =   0;//loop Controller
+        int    $i                       =   0;//loop Controller
+        int    $j                       =   0;//loop Controller
+
+	if (size($objectArray) == 0)
+        {
+      	      error "Select at least one object";
+        }
+        if ( $userParticleGroups > $objectArraySize )
+        {
+             $userParticleGroups = $objectArraySize;
+        }
+        //Loop Determines Object radius from min and max bounds and averages radi together
+        //in addition it also keeps track of the Min and Max radi of all selected objects
+	while($j < $objectArraySize)
+	    {
+             	select -r $objectArray[$j];
+                $radiusSize[$j] = objectRadius(0);
+                $radiusArrayTotal = $radiusArrayTotal + $radiusSize[$j];
+                if($radiusSize[$j] > $maxRadiusValue || $j == 0)
+                {
+                      $maxRadiusValue = $radiusSize[$j];
+                      //print ("maxR = "+$maxRadiusValue +"\n");
+                 }
+                 if($radiusSize[$j] < $minRadiusValue || $j == 0)
+                {
+                      $minRadiusValue = $radiusSize[$j];
+                      //print ("minR = "+$minRadiusValue +"\n");
+                 }
+                $j++;
+            }
+          $j = 0;//reset $j for next series
+
+        //Calculate average radi then compute and average, floor, and ceiling
+        //determine increments for grouping
+        $radiusArrayAverage=$radiusArrayTotal / $objectArraySize;
+        $floorRadiusArrayAverage = floor($radiusArrayAverage);
+        $ceilRadiusArrayAverage = ceil($radiusArrayAverage);
+        $objectGroupIncrement =  (($maxRadiusValue - $minRadiusValue)/$userParticleGroups);
+
+        //..................DeBugging Statements........................//
+        //print ("radiusArrayAverage = "+$radiusArrayAverage+"\n");     //
+        //print ("floorRadiusArrayAv = "+$floorRadiusArrayAverage+"\n");//
+        //print ("ceilRadiusArrayAv  = "+$ceilRadiusArrayAverage+"\n"); //
+        //print ("maxRadiusValue     = "+$maxRadiusValue+"\n");         //
+        //print ("minRadiusValue     = "+$minRadiusValue+"\n");         //
+        //print ("objectGroupIncrement  = "+$objectGroupIncrement+"\n");//
+        //..............................................................//
+
+        //construct selection arrays based off of user defined parameters
+        //print ("j = "+$j+"\n");
+        //print ("i = "+$i+"\n");
+        //print ("rad"+$radiusSize[$i]+"\n");
+        //print $radiusSize;
+        while($i < ($objectArraySize)) //run through original selection
+        {
+              $swap1 = $minRadiusValue;
+              $swap2 = $minRadiusValue + $objectGroupIncrement;
+              while($j < $userParticleGroups) //classify object new selection group
+              {
+                  //print ("min = "+$swap1);
+                  //print (" max = "+$swap2);
+                  //print (" radiusValue = "+$radiusSize[$i]+" i = "+$i+"\n");
+                  //if( $radiusSize[$i] >= ($minRadiusValue * $j) && $radiusSize[$i] < (($minRadiusValue * $j)+$objectGroupIncrement))
+
+                  if( $radiusSize[$i] >= $swap1 && $radiusSize[$i] < $swap2)
+                  {
+                        //print ("object "+$i+" placed in group "+$j+"\n");
+                        select -r $objectArray[$i];
+                        $pX = `objectCenter -x ($objectArray[$i])`;
+                        $pY = `objectCenter -y ($objectArray[$i])`;
+                        $pZ = `objectCenter -z ($objectArray[$i])`;
+                        $particlesPerObject = ($sizeMultiplier * ($radiusSize[$i]/$maxRadiusValue));
+                        print ("part n " + $particlesPerObject + "\n");
+                        $evalArray[$j] = ($evalArray[$j]+"-jbp "+" "+$pX+" "+$pY+" "+$pZ+" "+"-nj "+ floor($particlesPerObject) +" -jr "+ $radiusSize[$i]);
+                        $j = $objectArraySize;
+                        //$evalStatement =($evalStatement+$createCloud);
+                        //$i++;
+                  }
+                  if ( $radiusSize[$i] == $maxRadiusValue)
+                  {
+                        //print ("object "+$i+" placed in group "+$j+"\n");
+                        $pX = `objectCenter -x ($objectArray[$i])`;
+                        $pY = `objectCenter -y ($objectArray[$i])`;
+                        $pZ = `objectCenter -z ($objectArray[$i])`;
+                        $particlesPerObject = ($sizeMultiplier * ($radiusSize[$i]/$maxRadiusValue));
+                        print ("part n " + $particlesPerObject + "\n");
+                        //print ("$particlesPerObject " +$particlesPerObject+"\n");
+                        $evalArray[($userParticleGroups-1)] = ($evalArray[($userParticleGroups-1)]+"-jbp "+" "+$pX+" "+$pY+" "+$pZ+" "+"-nj "+ floor($particlesPerObject) +" -jr "+ $radiusSize[$i]);
+                        $j = $objectArraySize;
+                  }
+                  $swap1 = $swap2;
+                  $swap2 = $swap2 + $objectGroupIncrement;
+                  //print ("radiusValue = "+$radiusSize[$i]+" i = "+$i+"\n");
+                  //print ("j ran \n");
+
+                  $j++;
+              }
+              $j=0;
+              //print ("i loop = "+$i+"\n\n")
+              $i++;
+        }
+        //print ("evalArray \n");
+        //print $evalArray;
+        $i = 0;//reset $i for next series
+        while ($i < $userParticleGroups)
+        {
+              if($evalArray[$i] != "")//check for empty sets
+              {
+                    eval ("particle "+$evalArray[$i]+" -c 1;");
+              }
+              $i++;
+        }
+
+}// cloudGen end
+
+
+//GUI to CommandLine Link Procs
+proc CGResetcloudGen()
+{
+  intSliderGrp    -e -value 1 cloudGenGroupFSGV;
+  intSliderGrp    -e -value 1 cloudGenMaxParticleFSGV ;
+}
+
+proc CGsendCommands()
+{
+  float $partGroup            = `intSliderGrp   -q -value cloudGenGroupFSGV`;
+  float $partMax              = `intSliderGrp   -q -value cloudGenMaxParticleFSGV`;
+  print 4;
+  cloudGen($partGroup,$partMax);
+}
+
+proc CTResetcloudTools()
+{
+  floatSliderGrp    -e -value 0.0 cloudToolMinFSGV;
+  floatSliderGrp    -e -value 0.0 cloudToolMaxFSGV ;
+  intSliderGrp      -e -value 1   cloudToolVertSkipFSGV;
+  checkBox          -e -value 0   deleteOriginal;
+  checkBox          -e -value 1   cbAutoVolume;
+  //////////////////////////////////////////////////////
+  intSliderGrp    -e -value 1 cloudGenGroupFSGV;
+  intSliderGrp    -e -value 1 cloudGenMaxParticleFSGV ;
+}
+
+proc CTsendCommands()
+{
+  float $min            = `floatSliderGrp   -q -value cloudToolMinFSGV`;
+  //print ("min = "+$min+"\n");
+  float $max            = `floatSliderGrp   -q -value cloudToolMaxFSGV`;
+  //print ("max = "+$max+"\n");
+  int   $vertSkip       = `intSliderGrp   -q -value cloudToolVertSkipFSGV`;
+  int   $deleteOriginal = `checkBox         -q -v deleteOriginal`;
+  cloudTool($min,$max,$vertSkip,$deleteOriginal);
+}
+
+
+proc CTcheckOn()
+{
+
+     floatSliderGrp  -e -en 0 cloudToolMinFSGV;
+     floatSliderGrp  -e -en 0 cloudToolMaxFSGV;
+     floatSliderGrp    -e -value 0.0 cloudToolMinFSGV;
+     floatSliderGrp    -e -value 0.0 cloudToolMaxFSGV ;
+}
+
+proc CTcheckOff()
+{
+     floatSliderGrp  -e -en 1 cloudToolMinFSGV;
+     floatSliderGrp  -e -en 1 cloudToolMaxFSGV;
+}//end proc
+//Danger GUI code starts here Jesus help me
+proc CTmenu(int $width, int $height)
+{
+            menu
+                -label "Edit" ;
+            menuItem
+                -label "Reset Setting" -command CTResetcloudTools;
+            menu
+                -label "About";
+            menuItem
+                -label "Info" -command aboutStevesCloudGenWindow;
+}
+
+proc CGbody(int $width, int $height)
+{
+
+        columnLayout -adjustableColumn true;
+                rowLayout
+            -numberOfColumns 3
+            -columnWidth  1 80
+            -columnWidth  2 85
+            -columnWidth  3 100
+            -columnAlign  1 center
+            -columnAlign  2 left
+            -columnAlign  3 left
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0
+            -columnAttach 3 both 0;
+            text
+                -label ""
+                -annotation "relax and let my math do the work for you ";
+            checkBox -label "S/W Clouds" -en 0 -v 0 -onCommand ""  -offCommand "";
+            checkBox -label "Auto Radi"      -en 0 -v 0 -onCommand ""  -offCommand "";
+            setParent..;
+
+         rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 80
+            -columnWidth  2 190
+            -columnAlign  1 right
+            -columnAlign  2 right
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+            text
+                -label "Particle Groups "
+                -annotation "groups based on radi of selected objects";
+            intSliderGrp  -field true
+            -minValue 1 -maxValue 10
+            -fieldMinValue 1 -fieldMaxValue 10
+            -value 0 -en 1 cloudGenGroupFSGV;
+             setParent..;
+
+        rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 80
+            -columnWidth  2 190
+            -columnAlign  1 right
+            -columnAlign  2 right
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+            text
+                -label "Max Particle "
+                -annotation "Maximum particles per Object based on Min and Max Radi";
+            intSliderGrp  -field true
+            -minValue 1 -maxValue 100
+            -fieldMinValue 0 -fieldMaxValue 100
+            -value 10 -en 1 cloudGenMaxParticleFSGV;
+             setParent..;
+        //columnLayout -adjustableColumn true;
+       rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 145
+            -columnWidth  2 145
+            -columnAlign  1 left
+            -columnAlign  2 center
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+	button
+            -label "Apply"
+            -align "center"
+            -width ($width * .5)
+            -command "CGsendCommands";
+	button
+            -label "Close"
+            -align "center"
+            -width ($width * .5)
+            -command "deleteUI cloudGenWindow";
+            setParent..;
+}
+
+proc CTbody(int $width, int $height)
+{
+        columnLayout -adjustableColumn true;
+                rowLayout
+            -numberOfColumns 3
+            -columnWidth  1 42
+            -columnWidth  2 85
+            -columnWidth  3 100
+            -columnAlign  1 center
+            -columnAlign  2 left
+            -columnAlign  3 left
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0
+            -columnAttach 3 both 0;
+
+            text
+                -label ""
+                -annotation "relax and let my math do the work for you ";
+            checkBox -label "AutoVolume" -v 1 -onCommand CTcheckOn  -offCommand CTcheckOff cbAutoVolume;
+            checkBox -label "Delete Original" -v 0 deleteOriginal;
+            setParent..;
+
+         rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 42
+            -columnWidth  2 245
+            -columnAlign  1 center
+            -columnAlign  2 left
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+
+            text
+                -label "VertSkip"
+                -annotation "Max number of vertices skiped per loop iteration";
+            intSliderGrp  -field true
+            -minValue 1 -maxValue 10
+            -fieldMinValue 1 -fieldMaxValue 100
+            -value 1 -en 1 cloudToolVertSkipFSGV;
+             setParent..;
+
+        rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 42
+            -columnWidth  2 235
+            -columnAlign  1 center
+            -columnAlign  2 left
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+
+            text
+                -label "Value 1"
+                -annotation "Value 1 Cloud Scale Randomizer";
+            floatSliderGrp  -field true
+            -minValue 0.0 -maxValue 10.0
+            -fieldMinValue 0.0 -fieldMaxValue 100.0
+            -value 0 -en 0 cloudToolMinFSGV;
+             setParent..;
+
+        rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 42
+            -columnWidth  2 235
+            -columnAlign  1 center
+            -columnAlign  2 left
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+
+            text
+                -label "Value 2"
+                -annotation "Value 2 Cloud Scale Randomizer";
+            floatSliderGrp  -field true
+            -minValue 0.0 -maxValue 10.0
+            -fieldMinValue 0 -fieldMaxValue 100.0
+            -value 0 -en 0 cloudToolMaxFSGV;
+             setParent..;
+           separator -style "in";
+
+        rowLayout
+            -numberOfColumns 1
+            -columnWidth  1 $width
+            -columnAlign  1 center
+            -columnAttach 1 both 0;
+
+	button
+            -label "Quick Sphere"
+            -align "center"
+            -width ($width * 1)
+            -command "polySphere -r 1 -sx 8 -sy 8 -ax 0 1 0 -cuv 0 -ch 1 -name \"cloudBaseSphere\";";
+        setParent..;
+
+       rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 145
+            -columnWidth  2 145
+            -columnAlign  1 left
+            -columnAlign  2 center
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;
+
+	button
+            -label "Apply"
+            -align "center"
+            -width ($width * .5)
+            -command "CTsendCommands";
+	button
+            -label "Close"
+            -align "center"
+            -width ($width * .5)
+            -command "deleteUI cloudGenWindow";
+        setParent..;
+}
+
+//About Window
+global proc aboutStevesCloudGenWindow()
+{
+	if (`window -exists aboutStevesCloudGenWindow`)
+   {
+	deleteUI aboutStevesCloudGenWindow;
+   }//end if
+
+        int $width     = 240;
+        int $height    = 170;
+	string $name   = "\n Author:        Steve Eisenmann";
+        string $title  = "\n Title:            Steve's Cloud Tools Ver 1.0";
+	string $date   = "\n Date:           02.07.09";
+        string $discr  = "\n Discription:  This tool can create clouds if used,";
+        string $discr1 = "\n                     properly";
+        string $final  = "\n";
+        string $all    = ($name + $title + $date + $discr + $discr1 + $final);
+
+	window
+	    -title "Steve's CloudGen Info"
+	    -rtf false
+	    -s   false
+	    -mnb true
+	    -mxb false
+	    -mb  on
+	    -mbv on
+	    -ip
+	    -ret
+	    -width $width
+ 	    -height $height
+	    aboutStevesCloudGenWindow;
+
+
+        columnLayout -adjustableColumn true;
+        text
+            -label $all
+            -align "left";
+        button -l "Steve-Eisenmann.com" -w 140 -al "center" -c "showHelp -absolute \"http://www.steve-eisenmann.com\"";
+
+	showWindow aboutStevesCloudGenWindow;
+}//end global proc
+
+//Main Window
+global proc cloudGenWindow()
+{
+     int $width  = 290;
+     int $height = 175;
+
+     if ((`window     -ex cloudGenWindow`) == true) deleteUI cloudGenWindow;
+     if ( `windowPref -ex cloudGenWindow`) windowPref -r cloudGenWindow;
+	window
+	    -title "Steve's Cloud Tools 1.0"
+	    -rtf true
+	    -s   false
+	    -mnb true
+	    -mxb false
+	    -mb  on
+	    -mbv on
+	    -ip
+	    -ret
+	    -width $width
+ 	    -height $height
+	    cloudGenWindow;
+
+        CTmenu($width, $height);
+        CTbody($width, $height);
+       frameLayout
+     -label "Particle Creation"
+     -labelAlign "top"
+     -borderStyle "etchedIn"
+     -collapsable true;
+        CGbody($width, $height);
+     showWindow cloudGenWindow;
+}//global proc
+
+cloudGenWindow;
