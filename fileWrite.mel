@@ -19,24 +19,24 @@ proc string seTrimFilePath(string $path)
 proc seWriteVertPosition()
 { 
     $filePath =`system("cd ~/Desktop;pwd")`;
-    $cleanPath = `seTrimFilePath($filePath)`;
-    //endsWith($filePath, "\n");
-    //encodeString $filePath;
-    //print $filePath;
-    $exampleFileName = ( $cleanPath + "/example.txt" );
+    $cleanPath = `seTrimFilePath($filePath)`;//scrubs new line charcter off the end
+    $coordinatesFilePath = ( $cleanPath + "/example.txt" );
     
     //check permissions
     $dirChk = `filetest -w ($filePath+"/")`;
-    $fileChk = `filetest -w $exampleFileName`;
-    
-    print ($exampleFileName + "\n");
-    print ("Dir Check: " + $dirChk + "\n");
-    print ("File Check: " + $fileChk + "\n");
-    
-    $fileId=`fopen $exampleFileName "w"`;
+    $fileChk = `filetest -w $coordinatesFilePath`;
+    int $debug = 0;
+    if($debug == 1)
+    {
+        print ($coordinatesFilePath + "\n");
+        print ("Dir Check: " + $dirChk + "\n");
+        print ("File Check: " + $fileChk + "\n");
+    }
+    $fileId=`fopen $coordinatesFilePath "w"`;
 
-    fprint $fileId "Hello Bitches";
+    fprint $fileId ("Hello World "+`system("date")`);
     fclose $fileId; 
 }
+
 seWriteVertPosition();
 
