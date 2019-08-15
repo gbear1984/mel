@@ -1,0 +1,42 @@
+proc string seTrimFilePath(string $path)
+{
+    string $scrubString = `encodeString $path`;
+    int    $stringSize    =`size($scrubString)`;
+    int    $newStringSize = $stringSize-2;
+    
+    if(endsWith($path, "\n")==1)
+        {
+           string $fixedString = startString($path, $newStringSize);
+           return $fixedString;
+        }
+    if(endsWith($path, "\n")==0)
+        {
+           return $path;
+        }
+    
+}
+
+proc seWriteVertPosition()
+{ 
+    $filePath =`system("cd ~/Desktop;pwd")`;
+    $cleanPath = `seTrimFilePath($filePath)`;
+    //endsWith($filePath, "\n");
+    //encodeString $filePath;
+    //print $filePath;
+    $exampleFileName = ( $cleanPath + "/example.txt" );
+    
+    //check permissions
+    $dirChk = `filetest -w ($filePath+"/")`;
+    $fileChk = `filetest -w $exampleFileName`;
+    
+    print ($exampleFileName + "\n");
+    print ("Dir Check: " + $dirChk + "\n");
+    print ("File Check: " + $fileChk + "\n");
+    
+    $fileId=`fopen $exampleFileName "w"`;
+
+    fprint $fileId "Hello Bitches";
+    fclose $fileId; 
+}
+seWriteVertPosition();
+
