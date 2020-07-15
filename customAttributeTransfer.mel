@@ -49,5 +49,82 @@ proc string seSoloGetSurfaceShader(string $Solo)//returns Material of current se
 
 proc seCreateAttrList()
 {
+   select -heirarchy;
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` )
+            {
+                print (seSoloAttrNames($getSelection[$i])+" ");
+                
+                if(seSoloAttrExists($getSelection[$i]) == 0)
+                {
+                    seSoloCreateCustomShapeAttr($getSelection[$i]);
+                    }
+                if(seSoloAttrExists($getSelection[$i]) == 1)
+                {
+                    print (seSoloCreateCustomShapeAttr($getSelection[$i])+" ");
+                    }            
+                print (seSoloGetSurfaceShader($getSelection[$i])+"\n");
+            
+            }//if
+            
+         }//loop
+ }//proc
+/*
+proc seSoloCreateCustomShapeAttr(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                addAttr -ln ("mtoa_constant_texValue")  -at long  -dv 0 `ls -shapes -dag $Solo`;
+                }//if
+}//proc
+
+proc seEditCustomShapeAttr(int $id)
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                setAttr ($shapeSelector[0] + ".mtoa_constant_texValue")  $id ;
+                }//if
+         }//loop
+}//proc
+
+proc int seSoloAttrExists(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                string $shapeSelector[] = `ls -shapes -dag $Solo`;
+                return (`attributeQuery -node $shapeSelector[0] -exists "mtoa_constant_texValue"`+"\n");
+            }//if
+}//proc
+
+proc int seSoloAttrRecorder(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                string $selector = ($Solo);
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                return (`getAttr ($shapeSelector[0]+".mtoa_constant_texValue")`);
+            }//if
+}//proc
+
+proc string seSoloGetSurfaceShader(string $Solo)//returns Material of current selection
+{
+            if( `objExists $Solo` ) {   
+                string $myShapeNode[]   = `listRelatives -children -shapes ($Solo)`;
+                string $mySGs[]         = `listConnections -type shadingEngine ($myShapeNode[0])`;
+                string $surfaceShader[] = `listConnections ($mySGs[0] + ".surfaceShader")`;
+                return $surfaceShader[0];
+                }
+}
+
+proc seCreateAttrList()
+{
     
  }
