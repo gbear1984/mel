@@ -1,4 +1,77 @@
+proc seCreateCustomShapeAttr()
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
 
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                addAttr -ln ("mtoa_constant_texValue")  -at long  -dv 0 `ls -shapes -dag $selector`;
+                }//if
+         }//loop
+}//proc
+
+proc seEditCustomShapeAttr(int $id)
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                setAttr ($shapeSelector[0] + ".mtoa_constant_texValue")  $id ;
+                }//if
+         }//loop
+}//proc
+
+proc int seAttrExists()
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            if( `objExists $getSelection[$i]` ) {
+                string $selector = ($getSelection[$i]);
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                return (`attributeQuery -node $shapeSelector[0] -exists "mtoa_constant_texValue"`+"\n");
+            }//if
+         }//loop
+}//proc
+proc int seAttrRecorder()
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+     for ($i = 0; $i <= 0; $i++)
+        {
+            if( `objExists $getSelection[$i]` ) {
+                string $selector = ($getSelection[$i]);
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                return (`getAttr ($shapeSelector[0]+".mtoa_constant_texValue")`);
+            }//if
+         }//loop
+}//proc
+
+proc string seGetSurfaceShader()//returns Material of current selection
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            if( `objExists $getSelection[$i]` ) {   
+                string $myShapeNode[]   = `listRelatives -children -shapes ($getSelection[$i])`;
+                string $mySGs[]         = `listConnections -type shadingEngine ($myShapeNode[$i])`;
+                string $surfaceShader[] = `listConnections ($mySGs[0] + ".surfaceShader")`;
+                return $surfaceShader[0];
+                }
+            }
+}
+
+/*
 proc seCreateCustomShapeAttr()
 {
      string $getSelection[] = `ls -sl`;
