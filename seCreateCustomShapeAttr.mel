@@ -1,4 +1,56 @@
+//version 2
+proc seCreateCustomShapeAttr()
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
 
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                addAttr -ln ("mtoa_constant_texValue")  -at long  -dv 0 `ls -shapes -dag $selector`;
+                }
+         }//loop
+}//proc
+proc seEditCustomShapeAttr(int $id)
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                setAttr ($shapeSelector[0] + ".mtoa_constant_texValue")  $id ;
+                }
+         }//loop
+}//proc
+
+//seEditCustomShapeAttr 2
+
+proc seAttrRecorder()
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            if( `objExists $getSelection[$i]` ) {
+                string $selector = ($getSelection[$i]);
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+            //print $getSelection[$i];
+            //print $shapeSelector[0];
+            //attributeQuery -node ($shapeSelector[0]) -exists "mtoa_constant_texValue";
+            //print (`attributeQuery -node "BaseGroundShape" -exists "mtoa_constant_texValue"`+"\n");
+                print (`attributeQuery -node $shapeSelector[0] -exists "mtoa_constant_texValue"`+"\n");
+            }
+         }//loop
+}//proc
+
+
+//Version 1
+/*
 //ls -shapes -dag "transformNode";
 proc seCreateCustomShapeAttr()
 {
@@ -34,3 +86,4 @@ proc seEditCustomShapeAttr(int $id)
 }//proc
 seEditCustomShapeAttr 3
 //select "Cube_43Shape";
+*/
