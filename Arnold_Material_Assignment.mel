@@ -1,0 +1,203 @@
+proc seSoloCreateCustomShapeAttr(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                addAttr -ln ("mtoa_constant_texValue")  -at long  -dv 0 `ls -shapes -dag $Solo`;
+                }//if
+}//proc
+
+proc seEditCustomShapeAttr(int $id)
+{
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                setAttr ($shapeSelector[0] + ".mtoa_constant_texValue")  $id ;
+                }//if
+         }//loop
+}//proc
+proc seSoloEditCustomShapeAttr(string $solo, int $id)
+{
+                setAttr ($solo + ".mtoa_constant_texValue")  $id ;
+
+}//proc
+seSoloAttrExists("CylinderShape");
+proc int seSoloAttrExists(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                string $shapeSelector[] = `ls -shapes -dag $Solo`;
+                return (`attributeQuery -node $shapeSelector[0] -exists "mtoa_constant_texValue"`+"\n");
+            }//if
+}//proc
+proc string seSoloAttrNames(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                string $shapeSelector[] = `ls -shapes -dag $Solo`;
+                return ($shapeSelector[0]);
+            }//if
+}//proc
+
+proc int seSoloAttrRecorder(string $Solo)
+{
+            if( `objExists $Solo` ) {
+                string $selector = ($Solo);
+                string $shapeSelector[] = `ls -shapes -dag $selector`;
+                return (`getAttr ($shapeSelector[0]+".mtoa_constant_texValue")`);
+            }//if
+}//proc
+
+proc seShaderAssignment(string $soloShape, string $outgoingSG)
+{
+   string $currentSG = `seSoloGetSurfaceShader($soloShape)`;
+   if ($currentSG != "null")
+   {   
+        disconnectAttr -na ($soloShape+".instObjGroups[0]") ($currentSG +".dagSetMembers");   
+        connectAttr -f -na ($soloShape+".instObjGroups[0]") ($outgoingSG +".dagSetMembers");
+    }
+}
+//seShaderAssignment("pCubeShape1","blinn1SG");
+
+proc string seSoloGetSurfaceShader(string $Solo)//returns Material of current selection
+{
+            if( `objExists $Solo` ) {   
+                   {
+                    string $mySGs[]         = `listConnections -type shadingEngine ($Solo)`;
+                    string $surfaceShader[] = `listConnections ($mySGs[0] + ".surfaceShader")`;
+                    //return $surfaceShader[0];
+                    return $mySGs[0];
+                    }
+                    return "null1";
+                }
+                return "null2";
+}
+ 
+ proc string seGetFilePath()
+{ 
+    string $filePath = (`workspace -q -rd`+"data");
+    string $coordinatesFilePath = ( $filePath + "/attrRecord.txt" );    
+    //check permissions
+    $dirChk = `filetest -w ($filePath+"/")`;
+    $fileChk = `filetest -w $coordinatesFilePath`;
+    int $debug = 0;
+    if($debug == 1)
+    {
+        print ($coordinatesFilePath + "\n");
+        print ("Dir Check: " + $dirChk + "\n");
+        print ("File Check: " + $fileChk + "\n");
+    }
+    return $coordinatesFilePath; 
+}
+
+proc seCreateAttrListFile()
+{    //Variable Declaration
+     select -hierarchy;
+     string $getSelection[]     = `ls -sl`;
+     string $oldName            = "";
+     string $selector           = "";
+     
+     int $getSelectionArraySize = (size($getSelection));
+     
+     //File Initialization
+     string $filepath           = seGetFilePath();
+     $fileId                    =`fopen $filepath "w"`;
+     
+     for($i = 0; $i <= $getSelectionArraySize; $i++)    
+        {
+            if( `objExists $getSelection[$i]` )//error check for missing selections
+            {
+                string $testType = seSoloAttrNames($getSelection[$i]);
+                if($testType != "")
+                {
+                    string $testString = `objectType $testType`;
+                    if( $testString != "nurbsCurve" )//filters for non_material assignable shapes
+                    {
+                        if(seSoloAttrNames($getSelection[$i]) != $oldName)//filters for repeat names 
+                        {
+                             fprint $fileId (seSoloAttrNames($getSelection[$i])+" ");
+                
+                            if(seSoloAttrExists($getSelection[$i]) == 0)//set texValue att to 0 if it doesn't exist
+                            {
+                                fprint $fileId " 0 ";
+                            }
+                            if(seSoloAttrExists($getSelection[$i]) == 1)
+                            {
+                                fprint $fileId (seSoloAttrRecorder($getSelection[$i])+" ");
+                            }            
+                            fprint $fileId(seSoloGetSurfaceShader(seSoloAttrNames($getSelection[$i]))+" ");
+                         }//if
+                     }//if
+                      $oldName = (seSoloAttrNames($getSelection[$i]));       
+                 }//if
+            }//if
+         }//loop
+         fclose $fileId;
+         seAssignAttrFromFile(1);
+         print ("file output to: "+$filepath);
+ }//proc
+ 
+  proc string seAttrRecordRead()
+{
+     string $filepath = seGetFilePath();
+     string $strFileContent = "";
+     string $hdFileArray[];
+     $hdFile = `fopen $filepath "r"`;
+     while(!feof($hdFile))//magic
+     {
+ 	       $strFileContent += `fgetline $hdFile`;
+     }
+     fclose $hdFile;
+     return $strFileContent;
+    //print( $strFileContent + "\n" );
+	//$hdFileArray = stringToStringArray($strFileContent, " ");
+	/*int $getSelectionArraySize = (size($hdFileArray));
+	print $getSelectionArraySize;
+			for( $i in $hdFileArray )
+		{
+			// print the value
+			print($i + "\n");
+		}*/
+}
+
+proc seAssignAttrFromFile(int $debug)
+{
+  int $i = 0;
+  string $file = seAttrRecordRead();
+  $hdFileArray = stringToStringArray($file, " ");
+  int $getSelectionArraySize = (size($hdFileArray)); 
+  //print $getSelectionArraySize;
+  //switch to 1 if print out need list is required
+  if ($debug == 1)
+  {
+      while ($i < $getSelectionArraySize)
+      {
+          print  ($hdFileArray[$i] + " " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + "\n");  
+          $i=$i+3;  
+      }
+  }
+  if ($debug == 0)
+  {
+      while ($i < $getSelectionArraySize)
+      {
+          
+          if(`objExists $hdFileArray[$i]`)//skip if shape doesn't exist
+          {
+              seSoloCreateCustomShapeAttr($hdFileArray[$i]);
+              //seSoloAttrExists($hdFileArray[$i+1]);
+              seSoloEditCustomShapeAttr($hdFileArray[$i], $hdFileArray[$i+1]);
+              if($hdFileArray[$i+2] != "initialShadingGroup")//skip if shading group is default
+              {
+                  seShaderAssignment($hdFileArray[$i], $hdFileArray[$i+2]);
+                  }
+           }
+          //print  ($hdFileArray[$i] + " " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + "\n");  
+          $i=$i+3;
+          print ($i + "\n");   
+      }
+    }
+
+}
+//seAssignAttrFromFile(0);
+
