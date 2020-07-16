@@ -1,3 +1,4 @@
+
 proc seSoloCreateCustomShapeAttr(string $Solo)
 {
             if( `objExists $Solo` ) {
@@ -21,10 +22,10 @@ proc seEditCustomShapeAttr(int $id)
 }//proc
 proc seSoloEditCustomShapeAttr(string $solo, int $id)
 {
-                setAttr ($solo + ".mtoa_constant_texValue")  $id ;
+                setAttr ($solo + ".mtoa_constant_texValue")  $id;
 
 }//proc
-seSoloAttrExists("CylinderShape");
+
 proc int seSoloAttrExists(string $Solo)
 {
             if( `objExists $Solo` ) {
@@ -200,4 +201,5 @@ proc seAssignAttrFromFile(int $debug)
 
 }
 //seAssignAttrFromFile(0);
+
 
