@@ -1,0 +1,21 @@
+proc seNew_aiSS(string $shaderName)
+{	
+        //$shaderName = "test";
+        	
+		file 
+		-import 
+		-type "mayaAscii"  
+		-ignoreVersion 
+		-ra true 
+		-mergeNamespacesOnClash false 
+		-rpr "shader_import" 
+		-options "v=0;"  
+		-importTimeRange "combine" "/jobs/ads/dairy_queen_jump_in_J603864/build/enPoolSet/m_PoolSet/renderData/shaders/shader_import.ma";
+		
+		rename "shader_import_really_silly_SG" ($shaderName+"_SG");
+		rename "shader_import_really_silly_MTL" ($shaderName+"_MTL");
+		rename "shader_import_materialInfo7" ($shaderName+"_materialInfo");
+}
+seNew_aiSS("test4");
+
+//date
