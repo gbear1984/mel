@@ -1,3 +1,12 @@
+//gui codes
+proc seDirctoryListing()
+{
+    string $filePath = ("ls "+(`workspace -q -rd`+"data")); 
+    //print $filePath;
+    print (system ($filePath));
+    
+}
+
 proc seSoloCreateCustomShapeAttr(string $Solo)
 {
             if( `objExists $Solo` ) {
