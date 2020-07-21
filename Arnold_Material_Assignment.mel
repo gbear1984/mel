@@ -28,9 +28,13 @@ proc seSoloEditCustomShapeAttr(string $solo, int $id)
 
 proc int seSoloAttrExists(string $Solo)
 {
-            if( `objExists $Solo` ) {
+            if( `objExists $Solo`== 1 ) {
                 string $shapeSelector[] = `ls -shapes -dag $Solo`;
                 return (`attributeQuery -node $shapeSelector[0] -exists "mtoa_constant_texValue"`);
+            }//if
+             if( `objExists $Solo`== 0) {
+                
+                return "null";
             }//if
 }//proc
 
@@ -54,12 +58,20 @@ proc int seSoloAttrRecorder(string $Solo)
 proc seShaderAssignment(string $soloShape, string $outgoingSG)
 {
    string $currentSG = `seSoloGetSurfaceShader($soloShape)`;
+   //print ($soloShape+" "+$currentSG+"\n");
    if ($currentSG != "null")
    {
         if(`isConnected ($soloShape+".instObjGroups[0]") ($currentSG +".dagSetMembers")` == 1)
         { 
             disconnectAttr -na ($soloShape+".instObjGroups[0]") ($currentSG +".dagSetMembers");   
             connectAttr -f -na ($soloShape+".instObjGroups[0]") ($outgoingSG +".dagSetMembers");
+            //print "true";
+        }
+        if(`isConnected ($soloShape+".instObjGroups[0]") ($currentSG +".dagSetMembers")` == 0)
+        { 
+            disconnectAttr -na ($soloShape+".instObjGroups[0]") ($currentSG +".dagSetMembers");   
+            connectAttr -f -na ($soloShape+".instObjGroups[0]") ($outgoingSG +".dagSetMembers");
+            //print "true";
         }
     }
 }
@@ -103,7 +115,8 @@ proc string seGetSceneName()
         print ("Dir Check: " + $dirChk + "\n");
         print ("File Check: " + $fileChk + "\n");
     }
-    return $coordinatesFilePath; 
+    //return $coordinatesFilePath; 
+    return "/jobs/ads/dairy_queen_jump_in_J603864/build/enPoolSet/m_PoolSet/data/build_enPoolSet_default_modeling_v002_s001_attrRecord.txt";
 }
 
 proc seCreateAttrListFile()
@@ -177,9 +190,10 @@ proc string seAttrRecordRead()
      }
 }
 
-proc seAssignAttrFromFile(int $debug)
+proc seAssignAttrFromFile(int $debug, string $userNameSpace)
 {
   int $i = 0;
+  string $namespace = $userNameSpace;
   string $file = seAttrRecordRead();
   $hdFileArray = stringToStringArray($file, " ");
   int $getSelectionArraySize = (size($hdFileArray)); 
@@ -198,25 +212,28 @@ proc seAssignAttrFromFile(int $debug)
       while ($i < $getSelectionArraySize)
       {
           
-          if(`objExists $hdFileArray[$i]`)//skip if shape doesn't exist
+          if(`objExists ($namespace+$hdFileArray[$i])`)//skip if shape doesn't exist
           {
-              if(`seSoloAttrExists($hdFileArray[$i])` == 0)
+              if(`seSoloAttrExists(($namespace+$hdFileArray[$i]))` == 0)
               {
-                  seSoloCreateCustomShapeAttr($hdFileArray[$i]);
+                    seSoloCreateCustomShapeAttr(($namespace+$hdFileArray[$i]));
+                    //print "seSoloCreateCustomShapeAttr";
               }
-              if(`seSoloAttrExists($hdFileArray[$i])` == 1)
+              if(`seSoloAttrExists(($namespace+$hdFileArray[$i]))` == 1)
               {    
                   //seSoloAttrExists($hdFileArray[$i+1]);
-                  seSoloEditCustomShapeAttr($hdFileArray[$i], $hdFileArray[$i+1]);
+                  seSoloEditCustomShapeAttr(($namespace+$hdFileArray[$i]), $hdFileArray[$i+1]);
                   if($hdFileArray[$i+2] != "initialShadingGroup")//skip if shading group is default
                   {
-                      seShaderAssignment($hdFileArray[$i], $hdFileArray[$i+2]);
+                      seShaderAssignment(($namespace+$hdFileArray[$i]), $hdFileArray[$i+2]);
+                      //print (($namespace+$hdFileArray[$i])+" "+$hdFileArray[$i+2]+"\n");
                   }
                }   
            }
-          $i=$i+3; 
+          $i=$i+3;
+          //print ($i+ " "); 
       }
     }
 }
 //seCreateAttrListFile();
-//seAssignAttrFromFile(0);
+//seAssignAttrFromFile(0, "DEPM:");
