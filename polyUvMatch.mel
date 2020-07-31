@@ -1,0 +1,54 @@
+//Author: Steve Eisenmann
+//Title: polyUvMatch
+//Description: This script will match a 3D object to a its UV layout it is also
+//possible to do multiple objects at the same time
+//Date: 8/01/07
+//version: 1.00
+
+global proc polyUvMatch()
+{
+        //Read all selected objects into array
+	string $ObjectArray[] = `ls -sl`;
+
+	if (size($ObjectArray) == 0) 
+           {
+ 	    error "Select at least one PolygonMesh";
+ 	    }
+	string $oldName[]       = `ls -sl`;
+        int    $ObjectArraySize = (size($ObjectArray));
+
+	for ($j = 0; $j <= $ObjectArraySize; $j++)
+	    {
+             	select -r $ObjectArray[$j];
+             	rename    $ObjectArray[$j]"polyDistortion";
+             	scale -r 0 0 0;
+             	makeIdentity -apply true -t 1 -r 1 -s 1 -n 0;
+		//print $ObjectArray[$j];
+
+		int $UVs[] = `polyEvaluate -uv`;
+		DeleteHistory;
+		
+		print $UVs " UVs";
+		print("\n");
+		
+		//This sets the loop equal to the number of verts in the object
+		int $f = 0;
+		while ($f < $UVs[0])
+                      {
+	              select -r polyDistortion.map[$f];
+	              float $UVcord[] = `polyEditUV -query`;
+
+	              ConvertSelectionToVertices;
+                      move -r $UVcord[0] 0 $UVcord[1];
+                      $f = $f+1;
+                      print $f;
+                      print (" "); 
+                      print $UVcord[0];
+                      print (" ");
+                      print $UVcord[1];
+                      print("\n");
+		      }
+               rename "polyDistortion" $oldName[$j];
+	       select -cl;
+             }
+}

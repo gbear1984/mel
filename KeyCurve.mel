@@ -1,0 +1,87 @@
+
+proc KeyCurve(int $degree, int $loopJump)
+{
+     int    $j        = 0;
+     int    $i        = 0;
+     int    $total    = 0;
+     int    $count    = `playbackOptions -q -maxTime`;
+     float  $ux       = 0;
+     float  $uy       = 0;
+     float  $uz       = 0;
+     string $kCount   = "";
+     string $extend   = "";
+     string $kFront   = "";
+     string $kEnd     = "";
+     string $finalize = "";
+     string $selectArray[] = `ls -sl`;
+     while($i <= $count)
+        {
+          select -r $selectArray[0];
+          $ux = `getAttr ($selectArray[0]+".tx")`;
+          $uy = `getAttr ($selectArray[0]+".ty")`;
+          $uz = `getAttr ($selectArray[0]+".tz")`;
+       	  $extend = ($extend + "-p " + $ux + " " + $uy + " " + $uz + " ");
+       	  $i = $i + $loopJump;
+       	  currentTime -e ($i);
+       	  $j++;
+       	  //print "done \n";
+          }
+           //print("i = "+$i+ " j = "+$j+"\n");
+     //From here down is just to create properly formatted strings
+     //to create the curves command with degree levels as high as
+     //Maya will allow :D
+     if($degree == 1)
+if($degree == 1)
+     {
+          $i = 0;
+          while($i < $j)
+          {
+               $kCount = ($kCount + "-k " + $i + " ");
+               $i++;
+          }
+
+     }
+
+     if($degree > 1)
+     {
+          $i = 1;
+          while($i < ($j - $degree))
+          {
+               $kCount = ($kCount + "-k " + $i + " ");
+               $i++;
+          }
+     }
+     $i = 0;
+     while($i < ($degree))
+     {
+
+          $kFront = ($kFront + " -k 0 ");
+          if($j < $degree)
+          {
+                $kEnd   = ($kEnd   + " -k 1 ");
+          }
+          if($j > $degree)
+          {
+                $kEnd   = ($kEnd   + " -k "+ ($j - $degree));
+          }
+          $i++;
+     }
+
+     if($j <= $degree && $j > 1)
+     {
+          $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kEnd);
+     }
+
+     if($j > $degree)
+     {
+          $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kCount + $kEnd);
+     }
+
+     if($degree == 1)
+     {
+          $finalize = ("curve -d "+ $degree +" "+ $extend +" " + $kCount);
+     }
+     //print ($finalize);
+     eval ($finalize);
+}
+KeyCurve 3 5;

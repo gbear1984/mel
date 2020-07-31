@@ -1,0 +1,67 @@
+
+proc float[] seL_system_Shape(string $shape)
+{
+	float $direction[];
+	if($shape == "U")$direction = {  0, 1, 0, 0};
+	if($shape == "D")$direction = {  0,-1, 0, 0};
+	if($shape == "L")$direction = { -1, 0, 0, 0};
+	if($shape == "R")$direction = {  1, 0, 0, 0}; 
+	return $direction;	
+
+}
+//Array order x1,y1,x2,y2
+proc seL_system_Path(float $lineCoords[],float $yM, float $xM, int $xInvert, int $yInvert)
+{
+     string $begin = "curve -d 1 ";
+     string $extend;
+     string $finalize;
+     int $j;
+     for ($j = 0; $j <= 2; $j++)
+        {
+       	  float $x = ($lineCoords[$j*2]+$xM*$xInvert);
+          float $y = ($lineCoords[$j*2+1]+$yM*$yInvert);
+          string $z = 0;
+          string $jCount = $j;
+       	  string $kCount = ($kCount + "-k " + $jCount +" ");
+       	  $extend = ($extend + "-p " + $x + " " + $y + " " + $z + " ");
+          select -cl;
+          if($j == 1)
+               {
+                $finalize = $begin + $extend + $kCount;
+                eval ($finalize);
+                }
+
+        }
+    }
+proc tree(string $commands[], int $mult)
+{
+    //int $i = 1;
+    int $UD = 0;
+    int $LR = 0;
+    int $l  = 0;
+    int $j  = 0;
+    int $ti = 1;
+    int $ix = 1;
+    int $iy = 1;
+    float $treePosition[];
+    while( $l <= $mult)
+    {
+        
+        for($i in $commands)
+        {
+            $treePosition = `seL_system_Shape($i)`;        
+            if ($i == "U"){seL_system_Path($treePosition,$UD, $LR, $ix, $iy);$UD++;print ("U: "+$UD+" "+$LR);}
+            if ($i == "D"){seL_system_Path($treePosition,$UD, $LR, $ix, $iy);$UD--;print ("D: "+$UD+" "+$LR);}
+            if ($i == "L"){seL_system_Path($treePosition,$UD, $LR, $ix, $iy);$LR--;print ("L: "+$UD+" "+$LR);}
+            if ($i == "R"){seL_system_Path($treePosition,$UD, $LR, $ix, $iy);$LR++;print ("R: "+$UD+" "+$LR);}
+            print ("| "+$j+"\n");
+        $j++;
+        }
+        
+        
+        $j++;
+        $l++;
+    }
+}
+
+tree({"U","U","L","D","L","U"},5);

@@ -1,0 +1,60 @@
+proc CameraExporter(string $fileName, int $OAswitch)
+{
+
+
+     float $ObjTX              = 0;
+     float $ObjTY              = 0;
+     float $ObjTZ              = 0;
+
+     float $ObjRX              = 0;
+     float $ObjRY              = 0;
+     float $ObjRZ              = 0;
+     float $r                  = 1;
+
+     int   $setDecimal         = 2;
+     int   $GetEndFrame        = `getAttr "defaultRenderGlobals.endFrame"`;
+     int   $GetPlayBackEndTime = `playbackOptions -q -animationEndTime`;
+     int   $GetPlayBackRange   = `playbackOptions -q -maxTime`;
+     int   $betaFrameVar       = 2;
+     int   $i                  = 0;
+     int   $j                  = 0;
+
+     //Camera Specific Attrs
+     string $filmFit           = "";
+     float $aspectRatio        = 0;
+
+     string $part1 = "";
+     string $selection[]   = `ls -sl`;
+     int    $selectionSize = (size($selection));
+
+     $RIBFile = ( `internalVar -userTmpDir` + $fileName );
+     $fileId=`fopen $RIBFile "w"`;
+     //fprint $fileId ("TransformBegin \n");
+     while($i != $selectionSize)//selection controlled loop
+     {
+            //float $rand_Value  = roundingFunction(`rand .9 1.1`, $setDecimal);
+            //float $rand_ValueX = roundingFunction(`rand -45 45`  , $setDecimal);
+            //float $rand_ValueY = roundingFunction(`rand -45 45`  , $setDecimal);
+            //float $rand_ValueZ = roundingFunction(`rand -45 45`  , $setDecimal);
+
+            //$ObjTX = roundingFunction((`getAttr ($selection[$i] + ".tx")`), $setDecimal);
+            //$ObjTY = roundingFunction((`getAttr ($selection[$i] + ".ty")`), $setDecimal);
+            //$ObjTZ = roundingFunction((`getAttr ($selection[$i] + ".tz")`), $setDecimal);
+
+            //$ObjRX = roundingFunction((`getAttr ($selection[$i] + ".rx")`), $setDecimal);
+            //$ObjRY = roundingFunction((`getAttr ($selection[$i] + ".ry")`), $setDecimal);
+            //$ObjRZ = roundingFunction((`getAttr ($selection[$i] + ".rz")`), $setDecimal);
+
+            fprint $fileId ("\n\t TransformBegin");
+            fprint $fileId ("\n\t\t Translate " + ($ObjTX) +" "+ ($ObjTY) +" "+ ($ObjTZ) );
+            fprint $fileId ("\n\t\t Scale 1 "   + $rand_Value + " 1 ");
+            fprint $fileId ("\n\t\t Rotate "    + $ObjRX + " " + "1 0 0");
+            fprint $fileId ("\n\t\t Rotate "    + $ObjRY + " " + "0 1 0");
+            fprint $fileId ("\n\t\t Rotate "    + $ObjRZ + " " + "0 0 1");
+            fprint $fileId ("\n\t\t Sphere "    + $r + " " + (-$r) +" " + $r +" 360\n\t TransformEnd\n");
+            //fprint $fileId ("\n\t\t ReadArchive \"grapes2.rib\" \n\t TransformEnd\n");
+            ++$i;
+          }//loop
+     //fprint $fileId ("TransformEnd");
+     fclose $fileId;
+}//end proc

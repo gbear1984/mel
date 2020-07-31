@@ -1,88 +1,32 @@
-
-proc TorusBuilder(int $degree,int $count)
+proc TorusBuilder()
 {
-     int    $j        = 0;
-     int    $i        = 0;
-     float  $u        = 0;
-     float  $v        = 0;
-     float  $ux       = 0;
-     float  $uy       = 0;
-     float  $uz       = 0;
-     string $kCount   = "";
-     string $extend   = "";
-     string $kFront   = "";
-     string $kEnd     = "";
-     string $finalize = "";
-     while($j <= $count)
-        {
-          $u = ($j * .4);
-          $v = ($j * 0.008);
-          $ux = cos($u+$v)/(sqrt(2.0)+cos($v-$u));
-          $uy = sin($u+$v)/(sqrt(2.0)+cos($v-$u));
-          $uz = sin($v-$u)/(sqrt(2.0)+cos($v-$u));
-       	  $extend = ($extend + "-p " + $ux + " " + $uy + " " + $uz + " ");
-       	  $j++;
-          }
-     //From here down is just to create properly formatted strings
-     //to create the curves command with degree levels as high as
-     //Maya will allow :D
-     if($degree == 1)
-     {
-          $i = 0;
-          while($i < $j)
-          {
-               $kCount = ($kCount + "-k " + $i + " ");
-               $i++;
-          }
-
-     }
-
-     if($degree > 1)
-     {
-          $i = 1;
-          while($i < ($j - $degree))
-          {
-               $kCount = ($kCount + "-k " + $i + " ");
-               $i++;
-          }
-     }
-     $i = 0;
-     while($i < ($degree))
-     {
-
-          $kFront = ($kFront + " -k 0 ");
-          if($j < $degree)
-          {
-                $kEnd   = ($kEnd   + " -k 1 ");
-          }
-          if($j > $degree)
-          {
-                $kEnd   = ($kEnd   + " -k "+ ($j - $degree));
-          }
-          $i++;
-     }
-
-     if($j <= $degree && $j > 1)
-     {
-          $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kEnd);
-     }
-
-     if($j > $degree)
-     {
-          $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kCount + $kEnd);
-     }
-
-     if($degree == 1)
-     {
-          $finalize = ("curve -d "+ $degree +" "+ $extend +" " + $kCount);
-     }
-     eval ($finalize);
-     // This just adds the geometry from the constructed curve nothing new here
-     string $selection[] = `ls -sl`;
-     circle -ch on -o on -nr 0 1 0 -r 0.05 -n "torusCircle";
-     extrude -ch true -rn false -po 0 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 "torusCircle" $selection[0];
+float $u = 0;
+float $v = 0;
+float $ux = 0;
+float $uy = 0;
+float $uz = 0;
+string $kCount;
+string $jCount;
+string $extend;
+string $finalize;
+int $j = 0;
+//Don't change anything above this line
+while($j < 3140)
+{
+$u = ($j * .05);
+$v = ($j * 0.001);
+$ux = cos($u+$v)/(sqrt(2.0)+cos($v-$u));
+$uy = sin($u+$v)/(sqrt(2.0)+cos($v-$u));
+$uz = sin($v-$u)/(sqrt(2.0)+cos($v-$u));
+//Don't change anything below this line
+$jCount = $j;
+$kCount = ($kCount + "-k " + $jCount + " ");
+$extend = ($extend + "-p " + $ux + " " + $uy + " " + $uz + " ");
+$j++;
 }
-//curve -d 3 -p 0 0 0 -p 0 0 0 -p 0 0 0 -p 0 0 0 -p 0 0 0  -k 0  -k 0  -k 0 -k 0 -k 1 -k 2 -k 2 -k 2
-//curve -d 2 -p 0 0 0 -p 0 0 0 -p 0 0 0 -p 0 0 0 -p 0 0 0  -k 0 -k 0 -k 1 -k 2 -k 3  -k 3
-//curve -d 3 -p  0 0 0 -p  0 0 0 -p 0 0 0          -k 0 -k 0 -k 0 -k 1 -k 1 -k 1;
-//curve -d 3 -p -2 0 0 -p -1 0 0 -p 0 0 0 -p 1 0 0 -k 0 -k 0 -k 0 -k 1 -k 1 -k 1 ;
+$finalize = ("curve -d 1 " + $extend + $kCount);
+eval ($finalize);
+string $selection[] = `ls -sl`;
+circle -ch on -o on -nr 0 1 0 -r 0.05 -n "torusCircle";
+extrude -ch true -rn false -po 0 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 "torusCircle" $selection;
+}

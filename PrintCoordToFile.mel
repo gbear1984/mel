@@ -7,8 +7,6 @@ proc PrintCoordToFile()
      float $ObjRX = 0;
      float $ObjRY = 0;
      float $ObjRZ = 0;
-     float $r     = 1;
-
 
      int   $GetEndFrame        = `getAttr "defaultRenderGlobals.endFrame"`;
      int   $GetPlayBackEndTime = `playbackOptions -q -animationEndTime`;
@@ -17,6 +15,7 @@ proc PrintCoordToFile()
      int $i = 0;
      int $j = 0;
 
+     print ($GetEndFrame+" "+$GetPlayBackEndTime+" "+$GetPlayBackRange + "\n");
 
      string $Coord;
      string $selection[]   = `ls -sl`;
@@ -27,9 +26,6 @@ proc PrintCoordToFile()
      {
           while($j != $betaFrameVar)//frame range controlled loop
           {
-            float $rand_Value = `rand 0.95 1.05`;
-            float $rand_ValueX = `rand 0 10`;
-            float $rand_ValueZ = `rand 0 10`;
             $ObjTX = `getAttr ($selection[$i]+".tx")`;
             $ObjTY = `getAttr ($selection[$i]+".ty")`;
             $ObjTZ = `getAttr ($selection[$i]+".tz")`;
@@ -38,11 +34,11 @@ proc PrintCoordToFile()
             $ObjRY = `getAttr ($selection[$i]+".ry")`;
             $ObjRZ = `getAttr ($selection[$i]+".rz")`;
 
-            $Coord = ("\n TransformBegin \n\t Scale 1 " + $rand_Value + " 1 \n\t Rotate " + $rand_ValueX + " " + "  "+ $ObjRY + " " +  $rand_ValueZ + "\n\t Translate " + ($ObjTX) +" "+ ($ObjTY) +" "+ ($ObjTZ) + "\n\t ReadArchive \"grapesLOD1.rib\" \n TransformEnd");
-            print $Coord;
-            //print ("Frame_"+($j+1) +" "+$selection[$i]+" " + $Coord + "\n");
+            $Coord = (" tx "+$ObjTX +" ty "+$ObjTY +" tz "+$ObjTZ +" rx "+ $ObjRX +" ry "+ $ObjRY +" rz "+ $ObjRZ);
+            print ("Frame_"+($j+1) +" "+$selection[$i]+" " + $Coord + "\n");
             $j++;
           }//loop
+          print ($i + "\n");
           $j = 0;
           $i++;
      }//loop

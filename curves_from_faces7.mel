@@ -1,0 +1,148 @@
+// //////////////////////////////////////////////////////////////////////
+proc int main()
+{
+    int  $w, $d, $x, $f;
+    string $selection[] = `ls -sl`;
+    int $selectionSize = `size $selection`;
+
+        // loop for selecting each object
+        for ($w = 0; $w <$selectionSize; $w ++)
+        {   
+            
+            refresh -cv;
+            select -r $selection[$w]; 
+            float $totalFace[] = `getAttr ($selection[$w] +".f[*]")`;
+            int $maxFace = `size $totalFace`;
+            polySplitVertex;
+            select -r $selection[$w];
+            polyChipOff -ch 1 -kft 1 -dup 1 -off 0  ($selection[$w]+".f["+ 0 +":"+ $maxFace + "]");
+            polyPerformAction ("polySeparate -rs 1", "o", 0);
+            string $selectFaces[] = `ls -sl`;
+            int $sizeSelectFaces = `size $selectFaces`;
+            select -r $selectFaces[($sizeSelectFaces-1)];
+            doDelete;
+          
+            
+          print $selection;
+        }// end of loop for objects selected 
+    select -r $selection[0];
+        for ($w = 1; $w <$selectionSize; $w ++)
+        { 
+          select -tgl $selection[$w];
+        }  
+            doBakeNonDefHistory( 1, {"prePost" });
+            ungroup;
+     // select -hi;
+    
+
+    makeCurves(); // makes curves for the selected objects
+    extrudeAlongCurves();// extrudes a nurbs circle along selectec curves
+    return 1;
+}// end of main
+
+// Borrowed from Bryan Ewert's script, maya@ewertb.com - http://xyz2.net/mel/mel.072.htm
+// //////////////////////////////////////////////////////////////////////
+//  componentRange
+//
+// Description: Parses the provided selection item (presumably with a
+//  component factor (e.g. "pSphere.vtx[0:25]") and returns the
+//  start and end for the selection range.
+//
+// Example: If vertices 3 through 5 of a model are selected, Maya
+//  lists this as 'polyModel.vtx[3:5]'; in this case, componentRange()
+//  will return the array { 3, 5 }.  If only a single vertex is selected,
+//  Maya lists this as, e.g., 'polyMode.vtx[12]'; in this case,
+//  componentRange() will return the array { 12, 12 }.
+
+proc int[] componentRange( string $select )
+{
+      string $buffer[];
+      int $i, $tokens;
+      int $elements[2] = { 0, 0 };
+
+      $tokens = `tokenize $select "[:]" $buffer`;
+
+      $elements[0] = $elements[1] = int($buffer[1]);
+
+      if ( $tokens > 2 )
+        $elements[1] = int($buffer[2]);
+    print( "\n");
+      //print $elements;
+      return $elements;
+}// end of componentRange
+
+// //////////////////////////////////////////////////////////////////////
+// makes curves for the selected objects
+// once done will return with a nurbs circle + all curves selected
+proc int makeCurves()
+{
+    int $w, $f, $i, $curveCount;
+    string $curve = "curve -d 1 ";// starts the string for the curve type  
+    string $selection[] = `ls -sl`;
+    int $selectionSize = `size $selection`;
+
+        // loop for selecting each object
+        for ($w = 0; $w <$selectionSize; $w ++)
+        {   
+            refresh -cv;
+            select -r $selection[$w]; 
+            string $curve = "curve -d 1 "; 
+            select -r ($selection[$w] + ".f["+$i+"]");
+            string $convertSelect[] = `polyListComponentConversion -tv`;
+            int $sizeVerts = `size $convertSelect`;
+
+                if ($sizeVerts = 1){
+                    int $storedVertexSelectA[] = ` componentRange($convertSelect[0])`;
+                    int $sizeVertSelectA = `size $storedVertexSelectA`;
+                    float $vertXYZ[] = `pointPosition  ($selection[$w]+".vtx["+$storedVertexSelectA[0]+"]")`; //Finds the position of the vert
+                    $curve = ($curve + "-p " + $vertXYZ[0] + " " + $vertXYZ[1] + " " + $vertXYZ[2]);                
+                            
+                        for ($f = $storedVertexSelectA[0]; $f < (1+$storedVertexSelectA[1]); $f ++){
+                                  
+                            if ($f != $storedVertexSelectA[0]){
+                                float $vertXYZ[] = `pointPosition  ($selection[$w]+".vtx["+$f+"]")`; //Finds the position of the vert
+                                $curve = ($curve + "-p " + $vertXYZ[0] + " " + $vertXYZ[1] + " " + $vertXYZ[2]);
+                            }// end of    if ($f = $storedVertexSelectA[0]){ 
+                        }// end of for ($f = ($storedVertexSelectA[0]); $f <($storedVertexSelectA[(1+1)]); $f ++){
+                    $curve = ($curve + ";");
+                    eval $curve;
+                    print $curve;  
+                    string $genSelect[] = `ls -sl`;
+                    closeCurve -ch 1 -ps 1 -rpo 1 -bb 0.5 -bki 0 -p 0.1 $genSelect[0];
+                    $curveCount++; 
+                    
+                }// end of    if ($sizeVerts = 1){
+     
+        }// end of loop for objects selected 
+    circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 1 -d 3 -ut 0 -tol 0.001 -s 8 -ch 1; objectMoveCommand;
+    setAttr "nurbsCircle1.scaleX" .01;
+    setAttr "nurbsCircle1.scaleY" .01;
+    setAttr "nurbsCircle1.scaleZ" .01;
+        
+     for ($s = 1; $s < ($curveCount+1); $s ++){   
+ $selectAllCurve = ("curve" + $s);
+    select  -tgl $selectAllCurve;
+         print $selectAllCurve;
+        
+     }// end of loop for selecting all curves,   for ($s = 0; $f < $curveCount; $s ++){  
+
+    return 1;
+}// end of makeCurves
+// //////////////////////////////////////////////////////////////////////
+// Will extrude a nurbs circle along selected curves
+// nurbscircle must be selected first, then curves
+proc int extrudeAlongCurves(){
+
+    int $i;
+    string $array[] = `ls -sl`;
+    int $arraySize = `size $array`;
+
+    for ($i = 1; $i < $arraySize; $i ++)
+    {
+    refresh -cv;
+    extrude -ch true -rn false -po 0 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 $array[0] $array[$i] ;
+    }// end of loop for extruding
+return 1;
+}// end of extrudeAlongCurves
+
+main();

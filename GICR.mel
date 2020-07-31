@@ -1,0 +1,23 @@
+
+global proc GICR()
+{
+	string $GICastRecv[] = `ls -sl`;
+
+	if (size($GICastRecv) == 0) {
+ 	error "Select object to disable";
+ 	}
+	
+
+	int $GiCRSz = (size($GICastRecv));
+
+	for ($j = 0; $j <= $GiCRSz; $j++)
+		{ 
+		
+		select -r $GICastRecv[$j];
+		
+	        setAttr ($GICastRecv[$j] + ".miDeriveFromMaya") 0;
+		setAttr ($GICastRecv[$j] + ".miGlobillum") 4;
+		}
+		
+		select -cl;
+	}

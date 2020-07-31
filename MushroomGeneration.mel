@@ -1,0 +1,40 @@
+//circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 8 -ch 1; objectMoveCommand;
+//loft -ch 1 -u 1 -c 0 -ar 1 -d 3 -ss 1 -rn 0 -po 0 -rsn true "nurbsCircle1" "nurbsCircle2" "nurbsCircle3" "nurbsCircle4";
+
+
+/*//////////////////////////////////////////////////////////////////////////////////////////////////
+
+                                           Tool Info
+
+Copyright (C) 2009  Steve Eisenmann
+Date:         10.14.09
+Version:      0.1
+Discription:
+
+////////////////////////////////////////////////////////////////////////////////////////////////////*/
+
+global proc MushroomGeneration(int $userIn1)
+{
+  int    $i         = 0;
+  float  $radius    = 1;//Controls Mushroom Top
+  string $selection = "";
+
+  if($userIn1 < 1)
+  {
+    $userIn = 1;
+  }
+
+  while($i <= $userIn1)
+  {
+    if($i == $userIn1)
+    {
+      $radius = 0.002;
+    }
+   circle  -nr 0 1 0 -r $radius -name ("MushroomBodyCircle"+$i);
+   $selection = $selection + (" \"MushroomBodyCircle"+$i+"\" ");
+   move -r 0 $i 0;
+   $i++;
+  }
+  //select -r $selection;
+  eval ("loft -ch 1 -u 1 -c 0 -ar 1 -d 3 -ss 1 -rn 0 -po 0 -rsn true" + $selection+";");
+}

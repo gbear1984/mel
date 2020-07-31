@@ -1,0 +1,66 @@
+//proc fileTextureCleaner()
+
+proc fileTexPathChecker()
+{
+ //       source "C:/Documents and //Settings/Administrator/Desktop/MultiExtrude.mel";
+	string $fileTextureArray[] = `lsType file`;
+	int $arraySize = size($fileTextureArray);
+	if (size($fileTextureArray) == 0) {
+ 	error "No File Textures in scene";
+ 	}
+	string $fileName = "";
+	//int $fileTextureArraySize = (size($fileTextureArray));
+
+	for ($j = 0; $j < $arraySize; $j++)
+		{
+		
+			if($fileTextureArray[$j] != "<done>"){
+			    
+			$fileName = `getAttr -asString ($fileTextureArray[$j]+".fileTextureName"+"\n")`;
+			
+			if(size($fileName) == 0){
+				print ($fileTextureArray[$j]+" empty file path.\n");
+				}
+			if(size($fileName) > 0){
+        		print ($fileTextureArray[$j]+" "+$fileName+"\n");
+				}
+			}
+		}
+
+}
+
+proc fileTexPathFix()
+{
+	string $fileTextureArray[] = `lsType file`;
+	int $arraySize = size($fileTextureArray);
+	if (size($fileTextureArray) == 0) {
+ 	error "No File Textures in scene";
+ 	}
+	string $fileName = "";
+
+	for ($j = 0; $j < $arraySize; $j++)
+		{
+		
+			if($fileTextureArray[$j] != "<done>")
+			{   
+				$fileName = `getAttr -asString ($fileTextureArray[$j]+".fileTextureName"+"\n")`;
+			
+				if(size($fileName) == 0){
+					//print ($fileTextureArray[$j]+" empty file path.\n");
+				}
+				if(size($fileName) > 0)
+				{
+        			//print ($fileTextureArray[$j]+" "+$fileName+"\n");
+					string $prefix = "\/Users\/";
+					string $object = $fileName;
+					string $newObject = stringRemovePrefix($object, $prefix);
+					setAttr  ($fileTextureArray[$j]+".fileTextureName") -type "string" ("\""+$newObject+"\"");
+					
+				}
+			}
+		}
+
+
+}
+
+

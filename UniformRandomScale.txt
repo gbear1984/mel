@@ -1,0 +1,15 @@
+
+ proc URS(){
+float $scale = 0;
+float $s = 0;
+string $thing[] = `ls -sl`;
+int $size1 = (size($thing));
+int $i = 0;
+while($i < $size1){
+$scale = `rand .1 3`;
+$s = $scale;
+select -r $thing[$i];
+scale -r $s $s $s;
+$i++;
+}
+}

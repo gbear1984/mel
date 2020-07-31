@@ -1,0 +1,131 @@
+proc float[] seDistance()
+{
+    string $getSelection[] = `ls -sl`;
+    int    $i              = 0;
+    
+    float  $distance[];
+    float $x1 = `objectCenter -x $getSelection[$i]`;
+    float $x2 = `objectCenter -x $getSelection[($i+1)]`;
+    float $y1 = `objectCenter -y $getSelection[$i]`;
+    float $y2 = `objectCenter -y $getSelection[($i+1)]`;
+    float $z1 = `objectCenter -z $getSelection[$i]`;
+    float $z2 = `objectCenter -z $getSelection[($i+1)]`;
+    
+    $distance[0] = `sqrt((($x2-$x1)*($x2-$x1))+(($y2-$y1)*($y2-$y1))+(($z2-$z1)*($z2-$z1)))`;
+    $distance[1] = `sqrt(($x2-$x1)*($x2-$x1))`;
+    $distance[2] = `sqrt(($y2-$y1)*($y2-$y1))`;
+    $distance[3] = `sqrt(($z2-$z1)*($z2-$z1))`; 
+    $distance[4] = $x1;
+    $distance[5] = $x2;
+    $distance[6] = $y1;
+    $distance[7] = $y2;
+    $distance[8] = $z1;
+    $distance[9] = $z2;
+    
+    return $distance;
+}
+
+proc float[] seRotation()
+{
+    string $getSelection[] = `ls -sl`;
+    int    $i              = 0;
+    
+    float  $rotation[];
+    float $x1 = `getAttr  ($getSelection[$i]+".rotateX")`;
+    float $x2 = `getAttr ($getSelection[$i+1]+".rotateX")`;
+    float $y1 = `getAttr ($getSelection[$i]+".rotateY")`;
+    float $y2 = `getAttr ($getSelection[$i+1]+".rotateY")`;
+    float $z1 = `getAttr ($getSelection[$i]+".rotateZ")`;
+    float $z2 = `getAttr ($getSelection[$i+1]+".rotateZ")`;
+    
+    $rotation[0] = 0.00;
+    $rotation[1] = (`sqrt($x1*$x1)`-`sqrt($x2*$x2)`);
+    $rotation[2] = (`sqrt($y1*$y1)`-`sqrt($y2*$y2)`);
+    $rotation[3] = (`sqrt($z1*$z1)`-`sqrt($z2*$z2)`);
+    $rotation[4] = $x1;
+    $rotation[5] = $x2;
+    $rotation[6] = $y1;
+    $rotation[7] = $y2;
+    $rotation[8] = $z1;
+    $rotation[9] = $z2;
+    for($l in $rotation)print ("seRot: "+$l+"\n");
+    return $rotation;
+}
+
+proc float[] seVector(float  $distance[])
+{
+    
+    //float  $distance[]     = `seDistance`;
+    float  $direction[];
+    int    $i              = 4;
+    int    $j              = 0;
+    while($i <=9)
+    {
+        if ($distance[$i]>$distance[$i+1])
+           {    
+               $direction[$j] = 1;
+               $j++;
+           }
+        if ($distance[$i]<=$distance[$i+1])
+           {    
+               $direction[$j] = -1;
+               $j++;
+           }
+        $i = $i+2;
+    } 
+    return $direction;
+}
+proc float[] seRotationVector(float $rotation[])
+{
+    
+    //float  $rotation[]     = `seRotation`;
+    float  $direction[];
+    int    $i              = 4;
+    int    $j              = 0;
+    for($l in $rotation)print ("seRotVect: "+$l+"\n");
+    while($i <=9)
+    {
+        if ((($rotation[$i]+$rotation[$i+1]))/2>=180)
+           {    
+               $direction[$j] = -1;//*((`abs $rotation[$i]`/$rotation[$i])+(`abs $rotation[$i+1]`+1/$rotation[$i+1])/2));
+               
+               $j++;
+           }
+           //(abs x1 + x2)
+        if ((($rotation[$i]+$rotation[$i+1]))/2<180)
+           {    
+               $direction[$j] = 1;//*((`abs $rotation[$i]`/$rotation[$i])+(`abs $rotation[$i+1]+1`/$rotation[$i+1])/2);
+               $j++;
+           }
+        $i = $i+2;
+    } 
+    return $direction;
+}
+proc seDuplicate(int $NOC, int $bool)
+{
+    string $getSelection[] = `ls -sl`;
+    float  $distance[]     = `seDistance`;
+    float  $rotation[]     = `seRotation`;
+    float  $vector[]       = `seVector($distance)`;
+    float  $rVector[]      = `seRotationVector($rotation)`;
+    $NOC1                  = $NOC;
+    
+    select -r $getSelection[1];
+    for ($i=1; $i<$NOC; ++$i)
+    {
+    duplicate -rr;
+    move  -r (($distance[1]/$NOC1)*$vector[0]) (($distance[2]/$NOC1)*$vector[1]) (($distance[3]/$NOC1)*$vector[2]);
+    if($bool == 1)
+        {
+            //rotate -r (($rotation[1]/$NOC1-1)) (($rotation[2]/$NOC1-1)) (($rotation[3]/$NOC1-1));
+            //rotate -r (($rotation[1]/$NOC1-1)*$rVector[0]*$vector[0]) (($rotation[2]/$NOC1-1)*$rVector[1]*$vector[1]) (($rotation[3]/$NOC1-1)*$rVector[2]*$vector[2]);
+            rotate -r (($rotation[1]/$NOC1)*$rVector[0]) (($rotation[2]/$NOC1)*$rVector[1]) (($rotation[3]/$NOC1)*$rVector[2]);
+            //print ($rotation[1]/($NOC-1)+"\n");
+         }
+    }
+    //duplicate -rr -st;
+    
+   // print ("increment distance x = "+(($distance[1]/$NOC)*$vector[0])+"\n"+
+   //        "increment distance y = "+(($distance[2]/$NOC)*$vector[1])+"\n"+
+   //        "increment distance z = "+(($distance[3]/$NOC)*$vector[2])+"\n");
+}

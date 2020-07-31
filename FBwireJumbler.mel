@@ -1,0 +1,984 @@
+/*--------------------------------Updated 4-7-2007----
+ FB Wire Jumbler -v0.9-
+by Chris "Funky Bunnies" Whitaker
+======================================================
+--Thanks to Ian Eisenberg for editing 
+--	this script to display better in OSX
+------------------------------------------------------
+
+-Concept: This script was inspired by Neil Blevins' awesome "WireJumble" scripts for 3ds Max.
+
+-The Basics: Simply select the target objects in the order 
+              you'd like the wires to pass through and press Make Wires. 
+			  everything else should hopefully be pretty intuitive.  
+	
+[Y]BoundBox, [Y]AvgSphere, [Y]randVerts, [N]randFaces
+========================================================
+-Known Bugs/ Limitations in functionality:
+	-no support for non-polygonal wires
+	-limited control over degree of curve
+	-no shapes other than circular for now
+	-no 'Random Faces' support. I don't know if it's necessary.
+	-"All or Nothin'" setup for Target objects; No per-Target control
+	-Wires may 'squash' and not maintain correct form.
+		(I tried lofting but I was not satisfied with the result.  
+		       If you find a nice way around this please contact me!)
+==========================================================================
+//   This is my first script so I'm sure it has at least a few errors   \\
+//    So please feel free to contact me with any suggestions or bugs    \\
+//----------------------------------------------------------------------\\
+//            Contact Me: Chris@FunkyBunnies3d.com                      \\
+==========================================================================
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Generic Disclaimer: Use at your own risk.  I won't be responsible for anything bad that happens to your objects, scenes, or your car.//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+***	NOTE WHEN USING RANDVERT TARGET TYPE: 
+		-Curve target points are placed on random EPs rather than CVs for now
+		-SubD target points are calculated via an adaptive poly approximation of the SubD surface
+		-Polys use vertices
+		-NURBS uses CVs
+*/
+FBwireJumbler();
+		
+global proc FBjumble(string $prefixname,	int $qty, float $diam, float $diamvar, int $output,	int $seg, int $precision, int $tess, int $cap, int $targtype, int $TargsAs, int $targcleanup,	int $nodecleanup, int $grpnodes){
+
+int $deg ;
+string $caps ;
+string $circles ;
+string $curves ;
+string $selcurve[];
+string $selcircle[];
+string $selbundle = "" ;
+
+string $stringtmp ;
+float $temparray[] ;
+matrix $bbox[100][6] ;	
+
+//Combines selected and hilited objects into $dagnodes array
+string $shape[] = `ls -sl -o -dag -l -s`;
+string $dagnodes[] = `listRelatives -p -f $shape`;
+int $qtyselected = size($dagnodes);
+
+
+if ($qtyselected < 2 || $qtyselected > 100)  
+	{
+	     error "You must select between 2 and 100 target objects, foo!";
+	     
+	}
+
+else 
+{
+	int $progress = 0;
+	progressWindow
+		-title "Progress..."
+        -progress $progress
+        -status "Percent Complete: 0%"
+        -isInterruptable true;
+	
+	if ( $qtyselected < 5 )    $deg = ($qtyselected - 1) ;
+
+	else if ( $qtyselected == 5 )    $deg = 3 ;
+
+	else if ( 5 < $qtyselected <= 7 )     $deg = 5 ;
+
+	else if ( $qtyselected >= 8)     $deg = 7 ;
+
+	else
+	   error "My spider-sense is tingling.  Something must be wrong.";
+	   
+	for ($i=0; $i<$qtyselected; $i++)
+	     {
+			if ( `progressWindow -query -isCancelled` ) 
+			{
+				progressWindow -endProgress;
+				error "Process terminated by user";
+			}
+		   
+			float $temparray[] = `exactWorldBoundingBox $dagnodes[$i]`;
+		   
+			for ($j=0;$j<6;$j++)
+		   {
+			$bbox[$i][$j] = $temparray[$j];
+		   }
+	     }
+
+	for($i=0;$i<$qty;$i++)
+        { 
+			if ( `progressWindow -query -isCancelled` ) 
+			{
+				progressWindow -endProgress;
+				error "Process terminated by user";
+			}
+			$stringtmp = "" ;
+		for($j=0;$j<$qtyselected;$j++)
+			{
+				if ( `progressWindow -query -isCancelled` ) 
+				{
+					progressWindow -endProgress;
+					error "Process terminated by user";
+				}
+				select -r $dagnodes[$j];
+
+				switch( $targtype )
+			   	{
+					case 1:
+				   		{
+						$stringtmp = $stringtmp + " -p " + rand ($bbox[$j][0], $bbox[$j][3]) + " " + rand ($bbox[$j][1], $bbox[$j][4]) + " " + rand ($bbox[$j][2], $bbox[$j][5]);
+		   		   		}
+					break;
+				
+					case 2:
+				   		{
+						vector $randSph = sphrand( << (.5*($bbox[$j][3]-$bbox[$j][0])), (.5*($bbox[$j][4]-$bbox[$j][1])), (.5*($bbox[$j][5]-$bbox[$j][2])) >> ) ;
+						$stringtmp = $stringtmp + " -p " + ($randSph.x + ($bbox[$j][3] + $bbox[$j][0])*.5) + " " + ($randSph.y + ($bbox[$j][4] + $bbox[$j][1])*.5) + " " + ($randSph.z + ($bbox[$j][5] + $bbox[$j][2])*.5) ;
+			 
+						}
+					break;
+
+					case 3:
+				  	 { 
+					//Poly Mesh
+					   if (`objectType $shape[$j]` == "mesh" )
+					    {
+							int $vtmax[] = `polyEvaluate -v` ;
+							int $pickvert = (rand (0, $vtmax[0]));
+							float $randCV[] = `pointPosition -w .vtx[$pickvert]`;
+							$stringtmp += " -p " + $randCV[0] + " " + $randCV[1] + " " + $randCV[2] ;
+					    }
+					//Nurbs Curve
+					   else if (`objectType $shape[$j]` == "nurbsCurve" )
+						{
+							int $epmax = size (`ls -fl ($shape[$j] + ".ep[*]")`);
+							int $pickvert = (rand(0, $epmax));
+							float $randEP[] = `pointPosition -w .ep[$pickvert]`;
+							$stringtmp += " -p " + $randEP[0] + " " + $randEP[1] + " " + $randEP[2];
+						}
+					//Nurbs Surface
+					   else if (`objectType $shape[$j]` == "nurbsSurface" )
+						{
+							int $cvumax = `getAttr ($shape[$j] + ".maxValueU")`;
+							int $cvvmax = `getAttr ($shape[$j] + ".maxValueV")`;
+							int $pickvertu = (rand(0,$cvumax));
+							int $pickvertv = (rand(0,$cvvmax));
+							float $randCV[] = `pointPosition -w .cv[$pickvertu][$pickvertv]`;
+							$stringtmp += " -p " + $randCV[0] + " " + $randCV[1] + " " + $randCV[2] ;
+						}
+					//Subdiv surface
+					   else if (`objectType $shape[$j]` == "subdiv" )
+						{
+							string $tmpsubd2poly[] = `subdToPoly 
+								-ch off 
+								-aut on 
+								-format 1 
+								-depth 3
+								-sampleCount 1 
+								-maxPolys 1 
+								-extractPointPosition 0 
+								-shareUVs 1 
+								-subdNormals 0
+							($shape[$j])`;
+									
+							int $vtmax[] = `polyEvaluate -v` ;
+							int $pickvert = (rand (0, $vtmax[0]));
+							float $randCV[] = `pointPosition -w .vtx[$pickvert]`;
+							$stringtmp += " -p " + $randCV[0] + " " + $randCV[1] + " " + $randCV[2] ;
+							delete $tmpsubd2poly[0];
+						}
+					   else 
+						{
+							warning "The selected Target type works only with geometry. Reverting to BoundBox...";
+							$stringtmp = $stringtmp + " -p " + rand ($bbox[$j][0], $bbox[$j][3]) + " " + rand ($bbox[$j][1], $bbox[$j][4]) + " " + rand ($bbox[$j][2], $bbox[$j][5]);
+						}
+				   }
+				break;
+
+			   }	
+			   
+		   }
+		
+//if Targ objs as Influence/CVs
+		if ($TargsAs == "Influence") eval("curve -ws " + "-d " + $deg + " " + $stringtmp + "-n " + $prefixname + "curve#");
+
+//else Targ objs as Targets/ EPs
+		else
+		   {
+			eval("curve -ws " + "-d 1 " + $stringtmp + "-n " + "guidecurve");
+			string $delsel[] = `ls -sl`;
+			fitBspline -ch 0 -n ($prefixname+"curve#");
+			delete $delsel;
+		   }
+
+		string $temp[] = `ls -sl`;
+		$selcurve[0] = $temp[0];
+		$curves = $curves + $selcurve[0] + " " ;
+		
+
+		float $length = `arclen -ch off $selcurve[0]`;
+		
+		int $SV = ($length/42*$precision);
+		if ($SV < 1) $SV = 1;
+
+		circle 
+		   -c 0 0 0 
+		   -nr 0 1 0 
+		   -sw 360 
+		   -r (.5 * rand (($diam - $diamvar), ($diam + $diamvar)))
+		   -d 3 
+		   -ut 0 
+		   -tol 0.01 
+		   -s 8 
+		   -ch 1
+		   -n ($prefixname + "circle#");
+		string $temp[] = `ls -sl`;
+		$selcircle[0] = $temp[0];
+		if ($output == 1)
+		nurbsToPolygonsPref 
+			-un ($seg + 1) 
+			-vn $SV
+			-f 2
+			-pt 1;
+		else if ($output == 2)
+		{
+			$output = 0;
+		}
+		extrude 
+		   -ch true 
+		   -rn false 
+		   -po $output 
+		   -et 2 
+		   -ucp 1 
+		   -fpt 1 
+		   -upn 1 
+		   -rotation 0 
+		   -scale 1 
+		   -rsp 1 
+		   -n ($prefixname + "wire#")
+		   $selcircle[0] $selcurve[0];
+	  
+			if ($output == 0)
+			{
+				string $crntwire[] = `ls -sl -hd 1`;
+				
+				string $extwireshp[] = `listRelatives -s $crntwire[0]`;
+				//render precision
+				setAttr ($extwireshp[0] + ".uDivisionsFactor") $tess;
+				setAttr ($extwireshp[0] + ".vDivisionsFactor") $tess;
+				//viewport precision
+				setAttr ($extwireshp[0] + ".curvePrecision") ($tess-1);
+				setAttr ($extwireshp[0] + ".curvePrecisionShaded") ($tess);
+				//Nurbs Cap Wires
+				if ($cap == 1)
+				{
+					int $valV = `getAttr ($extwireshp[0] + ".maxValueV")`;
+					if ($valV == 0)	$valV = `getAttr ($extwireshp[0] + ".minValueV")`;
+						
+					string $storeit[] = `planarSrf -ch 1 -d 1 -ko 0 -tol 0.01 -rn 0 -po 0 ( $crntwire[0] + ".v[0]")`;
+					$caps += " " + $storeit[0] + " " + $storeit[1];
+					string $storeit[] = `planarSrf -ch 1 -d 1 -ko 0 -tol 0.01 -rn 0 -po 0 ( $crntwire[0] + ".v[" + $valV +"]")`;
+					$caps += " " + $storeit[0] + " " + $storeit[1];
+					
+						
+					
+				}
+				select -r $crntwire[0];
+			}
+
+		   string $selwire[] = `ls -sl` ;
+		   $selbundle = $selbundle + $selwire[0] + " ";
+		   $circles = $circles + $selcircle[0] + " ";
+		
+		   
+		   $progress = (100*$i/$qty);
+		   
+           progressWindow -edit 
+               -progress $progress
+               -status ("Percent Complete: " + $progress + "%");
+	   }
+		
+	if ( `progressWindow -query -isCancelled` ) 
+	{
+		progressWindow -endProgress;
+		error "Process terminated by user";
+	}
+	
+//Poly Cap Wires
+	if ($cap == 1)
+	{
+		eval("select -r " + $selbundle) ;
+		if ($output == 1)
+		{
+			FillHole;
+		}
+		if ($output == 0)
+		{
+			eval("select -r " + $caps);
+			$caps = `group -n ($prefixname + "caps#")`;
+		}
+
+	}
+	
+print ("FB WireJumbler has created " + $selbundle) ;	
+	
+//Group Stuff
+	eval("select -r " + $circles);
+	$circles = `group -n ($prefixname +"circles#")`;
+	eval ("select -r " + $curves);
+	$curves = `group -n ($prefixname +"curves#")`;
+	eval("select -r " + $selbundle) ;
+	$selbundle = `group -n ($prefixname + "wires#")`;
+	   }
+//Node Cleanup
+	if ($nodecleanup == 2)
+	   {
+		   select -r $circles;
+		   hide `ls -sl`;
+		}
+	else if ($nodecleanup == 3)
+	   {
+		   select -r $curves;
+		   hide `ls -sl`;
+	   }
+	else if ($nodecleanup == 4)
+	   {
+		   select -r $circles $curves;
+		   hide `ls -sl`;
+		}
+	else if ($nodecleanup == 5)   
+	   {
+		   	delete $circles $curves;
+			$circles = "";
+			$curves = "";
+	   }
+	else{}
+//Target Cleanup
+	if ($targcleanup == 2)
+	   {
+		for ($i=0; $i<$qtyselected; $i++)
+		{
+				
+			setAttr ($dagnodes[$i]+".primaryVisibility") 1;
+			setAttr ($dagnodes[$i]+".receiveShadows") 1;
+			setAttr ($dagnodes[$i]+".castsShadows") 1;
+			setAttr ($dagnodes[$i]+".visibleInReflections") 1;
+			setAttr ($dagnodes[$i]+".visibleInRefractions") 1;
+		}
+            
+	   }
+	else if ($targcleanup == 3)
+	   {
+		for ($i=0; $i<$qtyselected; $i++)
+		{
+				
+			setAttr ($dagnodes[$i]+".primaryVisibility") 0;
+			setAttr ($dagnodes[$i]+".receiveShadows") 0;
+			setAttr ($dagnodes[$i]+".castsShadows") 0;
+			setAttr ($dagnodes[$i]+".visibleInReflections") 0;
+			setAttr ($dagnodes[$i]+".visibleInRefractions") 0;
+		}
+	   }
+	else if ($targcleanup == 4)
+	   {
+		for ($i=0; $i<$qtyselected; $i++)
+		{
+			setAttr ($dagnodes[$i]+".visibility") 0;
+		}
+	   }
+	else if ($targcleanup == 5)
+	   {
+		for ($i=0; $i<$qtyselected; $i++)
+		{
+			delete $dagnodes[$i];			
+		}
+            
+	   }
+	eval("select -r " + $selbundle + " " + $circles + " " + $curves + " " + $caps);
+	if ($grpnodes == 0)
+		optionVar -stringValue "FBwjprev" ($selbundle + " " + $circles + " " + $curves + " " + $caps);
+	else
+	{
+		optionVar -stringValue "FBwjprev" (`group -n ($prefixname + "Bundle#")`);
+	}
+
+	progressWindow -endProgress;
+} 
+
+global proc FBwjScriptInfo()
+{
+	if (`window -exists FBwjinfoWin`)
+   {
+	deleteUI FBwjinfoWin;
+   }
+	
+	window -rtf 1 -s 0 -tbm 0 -t "About the script" FBwjinfoWin;
+	  columnLayout -rs 5;	  
+	  	frameLayout -bs "in" -li 45 -h 150 -w 236 -l "FB Wire Jumbler v.0.9" -mw 5;
+			string $infoform = `formLayout`;
+				text
+				-l "  Written by Chris \"Funky Bunnies\" Whitaker \n \n    This script is based off of the concept of \n Neil Blevins' Wire Jumble scripts for 3ds max.  \n \n  Use: Enter the desired parameters, select the \n target objects in order and press 'Make Wires'.";
+			string $FBemail = `button -l "Chris@FunkyBunnies3d.com" -w 150 -al "center" -c "showHelp -absolute \"mailto:Chris@FunkyBunnies3d.com\""`;
+			formLayout -e 
+				-af $FBemail "bottom" 10
+				-af $FBemail "left" 20
+				-af $FBemail "right" 20
+				
+				$infoform;
+			setParent..;
+		setParent..;
+	rowLayout -w 250 -cat 1 "left" 70 -cal 1 "center";
+	button -l "Close" -w 100 -al "center" -ann "Close window" -c "deleteUI FBwjinfoWin;";
+
+	showWindow FBwjinfoWin;
+}
+
+//procedure to grab values and call the Jumbling procedure
+global proc FBwjMakeWires()
+{
+	//if (!`textFieldGrp -ex -tx prefixname`) textFieldGrp -edit -tx "FBdefault" prefixname;
+	
+	string $prefixname = `textFieldGrp -q -tx prefixname`;
+	
+	int $qty = `intSliderGrp -q -v QtySlider`;
+	float $diam = `floatSliderGrp -q -v DiamSlider`;
+	float $diamvar = `floatSliderGrp -q -v DiamvarSlider`;
+	int $output = `optionMenuGrp -query -select GeoTypeDropdown`;
+	int $seg = `intSliderGrp -q -v SegmentsSlider`;
+	int $precision = `intSliderGrp -q -v PrecisionSlider`;
+	int $tess = `intSliderGrp -q -v TessSlider`;
+	int $cap = `checkBoxGrp -query -v1 CapCheckbox`;
+	int $targtype = `optionMenuGrp -query -select TargetTypeDropdown`;
+	int $TargsAs = `radioButtonGrp -q -select InterpRadio`;
+	
+	int $targcleanup = `optionMenuGrp -query -select CleanTargDropdown`;
+	int $nodecleanup = `optionMenuGrp -query -select NodeCleanupDropdown`;
+	int $grpnodes = `checkBoxGrp -query -v1 GrpWiresCheckbox`;	
+	
+FBjumble($prefixname, $qty, $diam, $diamvar, $output, $seg, $precision, $tess, $cap, $targtype, $TargsAs, $targcleanup, $nodecleanup, $grpnodes);
+
+	if ( !`optionVar -exists "FBwjprev"`)
+	{ 
+		button -e -en 0 Selprev;
+		button -e -en 0 Delprev;
+	}
+	else
+	{
+		button -e -en 1 Selprev;
+		button -e -en 1 Delprev;
+	}
+}
+
+
+global proc FBwjCheckGeomtype()
+{ //Checks Geotype optionmenu to edit controls and such
+	if (`optionMenuGrp -query -select GeoTypeDropdown` == 1)
+	{
+		intSliderGrp -e -vis 1 SegmentsSlider;
+		intSliderGrp -e -vis 1 PrecisionSlider;
+		intSliderGrp -e -vis 0 TessSlider;
+	}
+	else
+	{
+		intSliderGrp -e -vis 0 SegmentsSlider;
+		intSliderGrp -e -vis 0 PrecisionSlider;
+		intSliderGrp -e -vis 1 TessSlider;
+	}
+}
+//Applies current settings and stores them in optionvars
+global proc FBwjApplySettings()
+{
+	
+	optionVar -stringValue "FBwjprefixname" `textFieldGrp -q -tx prefixname`;
+	optionVar -intValue "FBwjqty" `intSliderGrp -q -v QtySlider`;
+	optionVar -floatValue "FBwjdiam" `floatSliderGrp -q -v DiamSlider`;
+	
+	if (`floatSliderGrp -q -v DiamvarSlider`>=`floatSliderGrp -q -v DiamSlider`) floatSliderGrp -e -v (`floatSliderGrp -q -v DiamSlider`-.0001) DiamvarSlider;
+	optionVar -floatValue "FBwjdiamvar" `floatSliderGrp -q -v DiamvarSlider`;
+	
+	optionVar -intValue "FBwjsides" `intSliderGrp -q -v SegmentsSlider`;
+	optionVar -intValue "FBwjprecision" `intSliderGrp -q -v PrecisionSlider`;
+	optionVar -intValue "FBwjtessellation" `intSliderGrp -q -v TessSlider`;
+	optionVar -intValue "FBwjcap" `checkBoxGrp -query -v1 CapCheckbox`;
+	optionVar -intValue "FBwjtargtype" `optionMenuGrp -query -select TargetTypeDropdown`;
+	optionVar -intValue "FBwjinterp" `radioButtonGrp -q -select InterpRadio`;
+	
+	optionVar -intValue "FBwjtargclean" `optionMenuGrp -query -select CleanTargDropdown`;
+	optionVar -intValue "FBwjnodeclean" `optionMenuGrp -query -select NodeCleanupDropdown`;
+	optionVar -intValue "FBwjgrpnodes" `checkBoxGrp -query -v1 GrpWiresCheckbox`;	
+
+	if(`optionVar -q "FBwjprefixname"` == "-prefixname-" && `optionVar -q "FBwjqty"` == 5 && `optionVar -q "FBwjdiam"` == .1 && `optionVar -q "FBwjdiamvar"` == 0 && `optionVar -q "FBwjsides"` == 8 && `optionVar -q "FBwjprecision"` == 25 && `optionVar -q "FBwjtessellation"` == 5 && `optionVar -q "FBwjcap"` == 0 && `optionVar -q "FBwjinterp"` == 1 && `optionVar -q "FBwjtargtype"` == 1 && `optionVar -q "FBwjtargclean"` == 1 &&	`optionVar -q "FBwjnodeclean"` == 1 && `optionVar -q "FBwjgrpnodes"` == 0)
+		menuItem -e -en 0 RestoreCust;
+	else menuItem -e -en 1 RestoreCust;
+	
+	
+}
+
+//Restores default optionvars
+global proc FBwjRestoreDef()
+{
+	optionVar -stringValue "FBwjprefixname" "-prefixname-";
+	optionVar -intValue "FBwjqty" 5;
+	optionVar -floatValue "FBwjdiam" .1;
+	optionVar -floatValue "FBwjdiamvar" 0;
+	optionVar -intValue "FBwjsides" 8;
+	optionVar -intValue "FBwjprecision" 25;
+	optionVar -intValue "FBwjtessellation" 5;
+	optionVar -intValue "FBwjcap" 0;
+	optionVar -intValue "FBwjinterp" 1;
+	optionVar -intValue "FBwjtargtype" 1;
+	optionVar -intValue "FBwjtargclean" 1;
+	optionVar -intValue "FBwjnodeclean" 1;
+	optionVar -intValue "FBwjgrpnodes" 0;
+	
+	menuItem -e -en 0 RestoreCust;
+		
+	FBwjUpdateUI();
+}
+
+//Restores optionvars from the FBwjApplySettings procedure
+global proc FBwjUpdateUI(){
+	string $prefixname = `optionVar -query "FBwjprefixname"`;
+	int $qty = `optionVar -query "FBwjqty"`;
+	float $diam = `optionVar -query "FBwjdiam"`;
+	float $diamvar = `optionVar -query "FBwjdiamvar"`;
+	int $output = 1;
+	int $seg = `optionVar -query "FBwjsides"`;
+	int $precision = `optionVar -query "FBwjprecision"` ;
+	int $tess = `optionVar -query "FBwjtessellation"` ;
+	int $cap = `optionVar -query "FBwjcap"`;
+	int $TargsAs =  `optionVar -exists "FBwjinterp"`;
+	int $targtype = `optionVar -query "FBwjtargtype"`;
+	
+	int $targcleanup = `optionVar -query "FBwjtargclean"`;
+	int $nodecleanup = `optionVar -query "FBwjnodeclean"`;
+	int $grpnodes = `optionVar -query "FBwjgrpnodes"`;
+
+
+	textFieldGrp -e
+		-tx $prefixname
+		prefixname;
+				  
+	intSliderGrp -e
+		-v $qty
+		QtySlider;
+			
+	floatSliderGrp -e
+		-v $diam
+		DiamSlider;
+				  
+	floatSliderGrp -e
+		-v $diamvar
+		DiamvarSlider;
+				  	  				  				  
+	intSliderGrp -e
+		-v $seg
+		SegmentsSlider;
+				  
+    intSliderGrp -e
+		-v $precision
+		PrecisionSlider;
+
+    intSliderGrp -e
+		-v $tess
+		TessSlider;
+				  
+	checkBoxGrp -e
+		-v1 $cap
+		CapCheckbox;
+		
+   	radioButtonGrp -e
+	   -select $TargsAs
+	   InterpRadio;
+			
+	optionMenuGrp -e -select $targtype TargetTypeDropdown; 
+						   
+	optionMenuGrp -e -select $targcleanup CleanTargDropdown;
+		
+	optionMenuGrp -e -select $nodecleanup NodeCleanupDropdown;
+				
+	checkBoxGrp -e
+		-v1 $grpnodes
+		GrpWiresCheckbox;
+}
+
+global proc FBwjSelprev()
+{
+	string $FBwjprev = `optionVar -q "FBwjprev"`;
+	string $tokens[];
+	int $numtokens = tokenize($FBwjprev, $tokens);
+	
+	for($i=0;$i<$numtokens;$i++)
+	{
+		if(!`objExists $tokens[$i]`)
+		{
+			error "This command only works if nodes have not been deleted or renamed";
+		}
+	}
+	eval("select -r " + $FBwjprev);
+		
+}
+
+global proc FBwjDelprev()
+{
+	string $FBwjprev = `optionVar -q "FBwjprev"`;
+	string $tokens[];
+	int $numtokens = tokenize($FBwjprev, $tokens);
+	
+	for($i=0;$i<$numtokens;$i++)
+	{
+		if(!`objExists $tokens[$i]`)
+		{
+			error "This command only works if nodes have not been deleted or renamed";
+		}
+	}
+	eval("delete " + $FBwjprev);
+			
+	optionVar -remove "FBwjprev";
+		
+	if ( !`optionVar -exists "FBwjprev"`)
+	{ 
+		button -e -en 0 Selprev;
+		button -e -en 0 Delprev;
+	}
+	
+}
+
+/////////////////////   IT'S GUI-MAKIN' TIME!!!!   ///////////////////////
+global proc FBwireJumbler(){
+	
+int $showPopup;
+	if ( !`optionVar -exists "FBwjprefixname"` )
+	{
+		$showPopup = 1;
+		optionVar -stringValue "FBwjprefixname" "-prefixname-";
+	}
+	if ( !`optionVar -exists "FBwjqty"` )
+		optionVar -intValue "FBwjqty" 5;
+	if ( !`optionVar -exists "FBwjdiam"` )
+		optionVar -floatValue "FBwjdiam" .1;
+	if ( !`optionVar -exists "FBwjdiamvar"` )
+		optionVar -floatValue "FBwjdiamvar" 0;
+	if ( !`optionVar -exists "FBwjsides"` )
+		optionVar -intValue "FBwjsides" 8;
+	if ( !`optionVar -exists "FBwjprecision"` )
+		optionVar -intValue "FBwjprecision" 25;
+	if ( !`optionVar -exists "FBwjtessellation"` )
+		optionVar -intValue "FBwjtessellation" 5;
+	if ( !`optionVar -exists "FBwjcap"` )
+		optionVar -intValue "FBwjcap" 0;
+	if ( !`optionVar -exists "FBwjinterp"` )
+		optionVar -intValue "FBwjinterp" 1;
+	if ( !`optionVar -exists "FBwjtargtype"` )
+		optionVar -intValue "FBwjtargtype" 1;
+	if ( !`optionVar -exists "FBwjtargclean"` )
+		optionVar -intValue "FBwjtargclean" 1;
+	if ( !`optionVar -exists "FBwjnodeclean"` )
+		optionVar -intValue "FBwjnodeclean" 1;
+	if ( !`optionVar -exists "FBwjgrpnodes"` )
+		optionVar -intValue "FBwjgrpnodes" 0;
+	
+string $prefixname = `optionVar -query "FBwjprefixname"`;
+int $qty = `optionVar -query "FBwjqty"`;
+float $diam = `optionVar -query "FBwjdiam"`;
+float $diamvar = `optionVar -query "FBwjdiamvar"`;
+int $output = 1;
+int $seg = `optionVar -query "FBwjsides"`;
+int $precision = `optionVar -query "FBwjprecision"` ;
+int $tess = `optionVar -query "FBwjtessellation"` ;
+int $cap = `optionVar -query "FBwjcap"`;
+int $TargsAs =  `optionVar -exists "FBwjinterp"`;
+int $targtype = `optionVar -query "FBwjtargtype"`;
+
+int $targcleanup = `optionVar -query "FBwjtargclean"`;
+int $nodecleanup = `optionVar -query "FBwjnodeclean"`;
+int $grpnodes = `optionVar -query "FBwjgrpnodes"`;
+
+
+if (`window -exists FBjumblerWin`)
+   {
+	deleteUI FBjumblerWin;
+   }
+else{}
+window
+		-title "FB Wire Jumbler v.0.9"
+		-iconName "FB Wire Jumbler"
+		-wh 400 800
+		-menuBar on
+		-menuBarVisible on
+		-minimizeButton on
+		-maximizeButton off
+		-sizeable on
+		-titleBar on
+		FBjumblerWin;
+
+menu
+   -label "Edit"
+   -tearOff 0;
+   menuItem
+	-label "Save Settings"
+	-c "FBwjApplySettings()"
+	SaveCust;
+   menuItem
+	-divider 1;
+   menuItem
+	-label "Restore Defaults"
+	-c "FBwjRestoreDef()"
+	RestoreDef;
+   menuItem
+	-label "Restore Custom"
+	-c "FBwjUpdateUI()"
+	RestoreCust;
+
+	if(`optionVar -q "FBwjprefixname"` == "-prefixname-" && `optionVar -q "FBwjqty"` == 5 && `optionVar -q "FBwjdiam"` == .1 && `optionVar -q "FBwjdiamvar"` == 0 && `optionVar -q "FBwjsides"` == 8 && `optionVar -q "FBwjprecision"` == 25 && `optionVar -q "FBwjtessellation"` == 5 && `optionVar -q "FBwjcap"` == 0&& `optionVar -q "FBwjinterp"` == 1 && `optionVar -q "FBwjtargtype"` == 1 && `optionVar -q "FBwjtargclean"` == 1 &&	`optionVar -q "FBwjnodeclean"` == 1 && `optionVar -q "FBwjgrpnodes"` == 0) menuItem -e -en 0 RestoreCust;
+	else menuItem -e -en 1 RestoreCust;
+
+menu
+   -label "Help"
+   -tearOff 0;
+
+   menuItem
+	-label "About"
+	-c "FBwjScriptInfo()";
+   menuItem
+	-divider 1;
+   menuItem
+	-label "Visit my website"
+	-c "showHelp -absolute \"http:\//www.FunkyBunnies3d.com\"";
+
+scriptJob -p FBjumblerWin -ro 0 -cu 1 -e "SelectionChanged" "if(`text -ex NumTargs`) text -edit -label (size (`ls -sl -o -dag -s`)) NumTargs;";
+
+string $ActionForm = `formLayout`;
+	string $Scroll =`scrollLayout`;
+		columnLayout -rs 5;
+           frameLayout -label "General Parameters" -labelAlign "top" -borderStyle "etchedOut" -cll 1;
+              columnLayout -rs 5;
+				  textFieldGrp
+					  	-cat 1 "left" 59
+					  	-cw2 102 300
+						-label "Name"
+						-tx $prefixname
+						-ann "Name to use as prefix in created nodes"
+						prefixname;
+				  
+				  separator -style "none";
+				  
+ 			      intSliderGrp
+		      		-label "Quantity "
+		      		-cw3 102 90 90
+					-v $qty
+		      		-min 1
+		      		-max 50
+		      		-fmx 1000
+		      		-ann "Number of wires"
+		      		-field true
+					QtySlider;
+     	          
+				  separator -style "none";
+			
+				  floatSliderGrp
+		      		-label "Wire Diameter "
+		      		-cw3 102 90 90
+					-dc "if(`floatSliderGrp -q -v DiamSlider` - `floatSliderGrp -q -v DiamvarSlider`< 0) floatSliderGrp -e -v (`floatSliderGrp -q -v DiamSlider`-.0001) DiamvarSlider;"
+					-cc "if(`floatSliderGrp -q -v DiamSlider` - `floatSliderGrp -q -v DiamvarSlider`< 0) floatSliderGrp -e -v (`floatSliderGrp -q -v DiamSlider`-.0001) DiamvarSlider;"
+					-v $diam
+		      		-min .001
+		      		-max 10
+		      		-fmx 1000000
+              		-pre 3
+		      		-ann "Diameter of wires"
+		      		-field true
+			  		DiamSlider;
+		    	  floatSliderGrp
+		      		-label "Diameter variation "
+		      		-cw3 102 90 90
+					-v $diamvar
+					-dc "if(`floatSliderGrp -q -v DiamSlider` - `floatSliderGrp -q -v DiamvarSlider`< 0) floatSliderGrp -e -v (`floatSliderGrp -q -v DiamSlider`-.0001) DiamvarSlider;"
+					-cc "if(`floatSliderGrp -q -v DiamSlider` - `floatSliderGrp -q -v DiamvarSlider`< 0) floatSliderGrp -e -v (`floatSliderGrp -q -v DiamSlider`-.0001) DiamvarSlider;"
+		      		-min 0
+		      		-max 10
+		      		-fmx 10000
+              		-pre 3
+		      		-ann "amount wire diameter may vary"
+		      		-field true
+					DiamvarSlider;
+				  
+				  separator -style "in" -w 310;
+				  				  				  
+				  optionMenuGrp
+				   -cat 1 "left" 21
+				   -cw2 103 150
+				   -label "Geometry type  "
+				   -ann "Geometry type for created wires"
+				   -cc "FBwjCheckGeomtype()"
+				   GeoTypeDropdown;
+				  
+				   menuItem -label "Poly";
+				   menuItem -label "NURBS";
+				   //menuItem -label "SubD";
+				  				  
+				  intSliderGrp
+		      		-label "Segments "
+		      		-cw3 102 90 90
+					-v $seg
+		      		-min 3
+		      		-max 20
+		      		-fmx 100
+		      		-ann "Number of sides on wire"
+		      		-field true
+					SegmentsSlider;
+     	          intSliderGrp
+		      		-label "Precision "
+		      		-cw3 102 90 90
+					-v $precision
+		      		-min 1
+		      		-max 100
+		      		-fmx 500
+		      		-ann "Subdivision along length of wire"
+		      		-field true
+					PrecisionSlider;
+				  intSliderGrp
+		      		-label "Tessellation "
+		      		-cw3 102 90 90
+					-vis 0
+					-v $tess
+		      		-min 1
+		      		-max 50
+		      		-fmx 500
+		      		-ann "Overall tessellation of wire"
+		      		-field true
+					TessSlider;
+				  
+				  separator -style "none";
+	  
+				  checkBoxGrp
+					-cat 1 "left" 41
+					-v1 $cap
+					-cw2 101 150
+ 			   		-numberOfCheckBoxes 1
+ 			   		-label "Cap wires"
+			   		-ann "Caps ends of wires"
+					CapCheckbox;
+		
+                  setParent ..;
+              setParent ..;
+	   frameLayout -w 316 -label "Target Parameters" -labelAlign "top" -borderStyle "etchedOut" -cll 1;
+              columnLayout -rs 5;
+			  
+			  rowLayout -nc 2 -cw2 150 200 -cat 1 "left" 30;
+			  		text -label ("Number of Targets: ");
+				  	text -fn "boldLabelFont" -label (size (`ls -sl -o -dag -s`)) NumTargs;
+				setParent ..;
+				
+				radioButtonGrp
+			       -numberOfRadioButtons 2
+				   -cat 1 "left" 29
+			       -cw3 102 100 100
+				   -select $TargsAs
+			       -label "Interpolation"
+			       -labelArray2 "Influence/CV" "Target/EP"
+			       -ann "Create wires using CV's or EP's"
+				   InterpRadio;
+			
+				optionMenuGrp
+				   -cat 1 "left" 35
+				   -cw2 103 100
+				   -label "Target type  "
+				   -ann "select Target type"
+				   TargetTypeDropdown;
+		
+				   menuItem -label "BoundBox";
+				   menuItem -label "AvgSphere";
+				   menuItem -label "RandVerts";
+				   
+				optionMenuGrp -e -select $targtype TargetTypeDropdown; 
+			setParent..;
+	setParent..;
+	   
+	frameLayout -w 316 -label "Cleanup Options" -mh 5 -labelAlign "top" -borderStyle "etchedOut" -cll 1;
+		columnLayout -rs 5;
+								   
+				optionMenuGrp
+				   -cat 1 "left" 16
+				   -cw2 103 100
+				   -label "Target Cleanup "
+				   -ann "Cleans up targets"
+				   CleanTargDropdown;
+		
+				   menuItem -label "None";
+				   menuItem -label "Renderable";
+				   menuItem -label "NonRenderable";
+				   menuItem -label "Hide";
+				   menuItem -label "Delete";
+				optionMenuGrp -e -select $targcleanup CleanTargDropdown;
+				optionMenuGrp
+				   -cat 1 "left" 21
+				   -cw2 103 100
+				   -label "Node Cleanup  "
+				   -ann "Cleans up extra nodes"
+				   NodeCleanupDropdown;
+		
+				   menuItem -label "None";
+				   menuItem -label "Hide circles";
+				   menuItem -label "Hide curves";
+				   menuItem -label "Hide both";
+				   menuItem -label "Delete both";
+				optionMenuGrp -e -select $nodecleanup NodeCleanupDropdown;
+				checkBoxGrp
+					-cat 1 "left" 22
+					-cw2 101 20
+					-v1 $grpnodes
+ 			   		-numberOfCheckBoxes 1
+ 			   		-label "Bundle nodes "
+			   		-ann "places created nodes within a group"
+					GrpWiresCheckbox;
+
+				setParent..;
+			setParent..;
+	
+		frameLayout -w 316 -label "Previous Wire Bundle" -mh 5 -labelAlign "top" -borderStyle "etchedOut" -cll 1 -cl 1;
+			rowLayout -nc 2 -w 316 -cw2 160 155 -cat 1 "left" 10;
+				button -l "Select previous WireBundle" -c "FBwjSelprev();" -ann "Select All nodes from last created Wire Bundle" Selprev;
+				button -l "Delete previous WireBundle" -c "FBwjDelprev();" -ann "Delete All nodes from last created Wire Bundle"  Delprev;
+			setParent..;
+		setParent..;
+	
+	setParent..;
+setParent..;
+			string $Go = `button -l "Make wires" -ann "First select Targets in order" -align "center" -w 105 -h 30 -c "FBwjMakeWires()"`;
+			string $Apply = `button -l "Apply" -align "center" -w 105 -h 30 -c "{FBwjApplySettings(); FBwjMakeWires();}"`;
+			string $Close = `button -l "Close" -ann "Close window" -align "center" -w 105 -h 30 -c "deleteUI FBjumblerWin;"`;
+			
+	formLayout -e 
+		-af $Scroll "top" 0
+		-af $Scroll "bottom" 40
+		-af $Scroll "left" 0
+		-af $Scroll "right" 0
+		
+		-an $Go "top"
+		-af $Go "bottom" 5
+		-ap $Go "right" 3 34
+		-af $Go "left" 5
+	
+		-an $Apply "top"
+		-af $Apply "bottom" 5
+		-ap $Apply "right" 1 66
+		-ap $Apply "left" 1 34
+		
+		-an $Close "top"
+		-af $Close "bottom" 5
+		-af $Close "right" 5
+		-ap $Close "left" 3 66
+		 $ActionForm;
+	
+	if ( !`optionVar -exists "FBwjprev"`)
+		{ 
+			button -e -en 0 Selprev;
+			button -e -en 0 Delprev;
+		}
+
+showWindow FBjumblerWin;
+
+	if ($showPopup == 1)
+		{
+			FBwjScriptInfo();
+			$showPopup = 0;
+		}
+}

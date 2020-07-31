@@ -1,0 +1,531 @@
+/*//////////////////////////////////////////////////////////////////////////////////////////////////
+Random Tools: Basic set of random translation, rotation, and scaling tools
+Copyright (C) 2007  Steve Eisenmann
+Date:        10.13.07
+Updated:     12.8.07
+Version:     1.75
+Discription: This utility can randomly Translate, Rotate, and Scale one or more objects.
+
+Version 1.5 : Added the ability to set the min and max values in one check box
+10.13.07      Added in a menubar with a reset settings feature, and info box
+
+Version 1.75: New Scale feature added "Uniform Random Scale" allows user to randomly scale
+12.8.07       object like R1*(XYZ) instead of (R1*X, R2*Y, R3*Z)
+              Small GUI
+
+Next Version: I will be changing the layout to a tabbed window. I'm doing this so that I can add
+              in new modules like Duplication and Componet modes.
+
+Users         If you have ideas for this tool that you would like to see added, or you have found a
+              bug in the script please tell e-mail me at: eisenman@itg.uiuc.edu
+              
+              If you update my script and release a new version please add your info under mine in
+              the aboutStevesRandomWindow Global proc. Also please send me a copy of it.
+              
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+proc UniformRandomScale(float $randValueMin, float $randValueMax, string $Selection)
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rSXYZ = getRand($randValueMin, $randValueMax);
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            scale -r $rSXYZ $rSXYZ $rSXYZ;
+         }//loop
+}//proc
+
+proc float randTransition(float $randMinTX, float $randMaxTX, float $randMinTY, float $randMaxTY,float $randMinTZ, float $randMaxTZ, string $Selection)
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rTx = getRand($randMinTX, $randMaxTX);
+            float $rTy = getRand($randMinTY, $randMaxTY);
+            float $rTz = getRand($randMinTZ, $randMaxTZ);
+
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            move -r $rTx $rTy $rTz;
+
+         }//loop
+     return 0;
+}//proc
+
+
+proc float randRotation(float $randMinRX, float $randMaxRX, float $randMinRY, float $randMaxRY,float $randMinRZ, float $randMaxRZ,string $Selection)
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rRx = getRand($randMinRX, $randMaxRX);
+            float $rRy = getRand($randMinRY, $randMaxRY);
+            float $rRz = getRand($randMinRZ, $randMaxRZ);
+
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            rotate -r $rRx $rRy $rRz;
+
+         }//loop
+     return 0;
+}//proc
+
+proc float randScale(float $randMinSX, float $randMaxSX, float $randMinSY, float $randMaxSY,float $randMinSZ, float $randMaxSZ,string $Selection)//, string $originalSelection[])
+{
+     eval ($Selection);
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            float $rSx = getRand($randMinSX, $randMaxSX);
+            float $rSy = getRand($randMinSY, $randMaxSY);
+            float $rSz = getRand($randMinSZ, $randMaxSZ);
+
+            string $selector = ("select -r " + $getSelection[$i]);
+            eval ($selector);
+            scale -r $rSx $rSy $rSz;
+
+         }//loop
+     return 0;
+}//proc
+
+proc string[] getSelection()
+{
+     string $selArray[] = `ls -sl`;
+     return $selArray;
+     if (size($selArray) == 0)
+        {
+            error "Select at least one object";
+        }//if
+}//proc
+
+//This Proc will be upgrade in the future to be able
+//to do functions like gauss, noise, and sphererand
+proc float getRand(float $randMin, float $randMax)
+{
+     float $rand_Value = `rand $randMin $randMax`;
+     return $rand_Value;
+}//proc
+
+proc string selectionString()
+{
+     string $selection;
+     string $listArray[] = `getSelection`;
+     int $selectionSize = (size($listArray));
+
+     for($i = 0; $i <= $selectionSize; $i++)
+     {
+            $selection = ($selection + " " + $listArray[$i]);
+     }//loop
+     string $evaluate = ("select -r " + $selection);
+     return $evaluate;
+}//proc
+//Fix Check Box Bug For UNIFORM RANDOM SCALE
+
+proc checkOn(string $Type, int $bool)
+{
+  //This $UXYZ checks to make sure Uniform is not active
+  int $UXYZ = `checkBox -q -v UXYZ`;
+  if($bool == 0)
+  {
+     floatField -e -en 1 ("min"+$Type+"A");
+     floatField -e -en 1 ("max"+$Type+"A");
+     floatField -e -en 0 ("min"+$Type+"X");
+     floatField -e -en 0 ("max"+$Type+"X");
+     floatField -e -en 0 ("min"+$Type+"Y");
+     floatField -e -en 0 ("max"+$Type+"Y");
+     floatField -e -en 0 ("min"+$Type+"Z");
+     floatField -e -en 0 ("max"+$Type+"Z");
+  }//end if
+  if($bool == 1)
+  {
+     checkBox -e -v 0 SXYZ;
+     checkBox -e -vis 0 SXYZ;
+     floatField -e -en 1 ("min"+$Type+"U");
+     floatField -e -en 1 ("max"+$Type+"U");
+     floatField -e -en 0 ("min"+$Type+"A");
+     floatField -e -en 0 ("max"+$Type+"A");
+     floatField -e -en 0 ("min"+$Type+"X");
+     floatField -e -en 0 ("max"+$Type+"X");
+     floatField -e -en 0 ("min"+$Type+"Y");
+     floatField -e -en 0 ("max"+$Type+"Y");
+     floatField -e -en 0 ("min"+$Type+"Z");
+     floatField -e -en 0 ("max"+$Type+"Z");
+  }//end if
+}// end proc
+
+proc checkOff(string $Type, int $bool)
+{
+  if($bool == 0)
+  {
+     floatField -e -en 0 ("min"+$Type+"A");
+     floatField -e -en 0 ("max"+$Type+"A");
+     floatField -e -en 1 ("min"+$Type+"X");
+     floatField -e -en 1 ("max"+$Type+"X");
+     floatField -e -en 1 ("min"+$Type+"Y");
+     floatField -e -en 1 ("max"+$Type+"Y");
+     floatField -e -en 1 ("min"+$Type+"Z");
+     floatField -e -en 1 ("max"+$Type+"Z");
+  }//end if
+  if($bool == 1)
+  {
+     checkBox -e -vis 1 SXYZ;
+     floatField -e -en 0 ("min"+$Type+"U");
+     floatField -e -en 0 ("max"+$Type+"U");
+     floatField -e -en 0 ("min"+$Type+"A");
+     floatField -e -en 0 ("max"+$Type+"A");
+     floatField -e -en 1 ("min"+$Type+"X");
+     floatField -e -en 1 ("max"+$Type+"X");
+     floatField -e -en 1 ("min"+$Type+"Y");
+     floatField -e -en 1 ("max"+$Type+"Y");
+     floatField -e -en 1 ("min"+$Type+"Z");
+     floatField -e -en 1 ("max"+$Type+"Z");
+  }//end if
+}//end proc
+
+proc randGuiSection(string $label, string $fieldName, string $fieldName2, string $enable, string $cbEnable, string $cbName, int $fieldValue1,int $fieldValue2, int $typeRec)
+{
+     string $field1 = ("floatField -v " + $fieldValue1 + " -en " + $enable + " " + $fieldName  +";");
+     string $field2 = ("floatField -v " + $fieldValue2 + " -en " + $enable + " " + $fieldName2 +";");
+     string $check;
+     string $CC = ("\"checkOn(" + $typeRec + ")\" ");
+
+     global string $NullCheck = "Null";
+     global string $TCheck = "T";
+     global string $RCheck = "R";
+     global string $SCheck = "S";
+
+     //
+     if($typeRec == "0")
+         {
+         //No checkbox will be created
+         $check  = ("checkBox -label "+  "\"\"" + " -align " + "\"right\"" + " -vis" + $cbEnable + " " + "-onCommand " + "\"checkOn($NullCheck, 0)\" " + "-offCommand " + "\"checkOff($CheckNull,0)\" " + $cbName + ";");
+         }//end if
+
+     else if($typeRec == "1")
+         {
+         //Translation Checkbox will be created
+              $check  = ("checkBox -label "+  "\"\"" + " -align " + "\"right\"" + " -vis" + $cbEnable + " " + "-onCommand " + "\"checkOn($TCheck, 0)\" " + "-offCommand " + "\"checkOff($TCheck, 0)\" " + $cbName + ";");
+         }//end else if
+
+     else if($typeRec == "2")
+         {
+         //Rotation Checkbox will be created
+              $check  = ("checkBox -label "+  "\"\"" + " -align " + "\"right\"" + " -vis" + $cbEnable + " " + "-onCommand " + "\"checkOn($RCheck, 0)\" " + "-offCommand " + "\"checkOff($RCheck, 0)\" " + $cbName + ";");
+         }//end else if
+
+     else if($typeRec == "3" && $cbName != "UXYZ")
+         {
+         //Scale Checkbox will be created
+              $check  = ("checkBox -label "+  "\"\"" + " -align " + "\"right\"" + " -vis" + $cbEnable + " " + "-onCommand " + "\"checkOn($SCheck, 0)\" " + "-offCommand " + "\"checkOff($SCheck, 0)\" " + $cbName + ";");
+         }//end else if
+
+     else if($typeRec == "3" && $cbName == "UXYZ")
+         {
+         //Scale Checkbox will be created
+              $check  = ("checkBox -label "+  "\"\"" + " -align " + "\"right\"" + " -vis" + $cbEnable + " " + "-onCommand " + "\"checkOn($SCheck, 1)\" " + "-offCommand " + "\"checkOff($SCheck, 1)\" " + $cbName + ";");
+         }//end else if
+
+     rowLayout
+        -numberOfColumns 4
+        -columnWidth 1 12
+        -columnWidth 2 60
+        -columnWidth 3 80
+        -columnWidth 4 80
+        -columnAlign  1 right
+        -columnAlign  2 right
+        -columnAlign  3 center
+        -columnAlign  4 center
+        -columnAttach 1 both 0
+        -columnAttach 2 both 0
+        -columnAttach 3 both 0
+        -columnAttach 4 both 0;
+
+     eval($check);
+
+     text
+        -label $label
+        -align "center";
+
+        eval($field1);
+        eval($field2);
+     setParent..;
+
+}//proc
+
+proc passFields1()
+{
+     int   $cTXYZ    = `checkBox   -q -value TXYZ`;
+     int   $cRXYZ    = `checkBox   -q -value RXYZ`;
+     int   $cSXYZ    = `checkBox   -q -value SXYZ`;
+     int   $cUXYZ    = `checkBox   -q -value UXYZ`;
+
+
+     float $minTXf   = `floatField -q -value minTX`;
+     float $maxTXf   = `floatField -q -value maxTX`;
+     float $minTYf   = `floatField -q -value minTY`;
+     float $maxTYf   = `floatField -q -value maxTY`;
+     float $minTZf   = `floatField -q -value minTZ`;
+     float $maxTZf   = `floatField -q -value maxTZ`;
+     float $minTXYZf = `floatField -q -value minTA`;
+     float $maxTXYZf = `floatField -q -value maxTA`;
+
+     float $minRXf   = `floatField -q -value minRX`;
+     float $maxRXf   = `floatField -q -value maxRX`;
+     float $minRYf   = `floatField -q -value minRY`;
+     float $maxRYf   = `floatField -q -value maxRY`;
+     float $minRZf   = `floatField -q -value minRZ`;
+     float $maxRZf   = `floatField -q -value maxRZ`;
+     float $minRXYZf = `floatField -q -value minRA`;
+     float $maxRXYZf = `floatField -q -value maxRA`;
+
+     float $minSXf   = `floatField -q -value minSX`;
+     float $maxSXf   = `floatField -q -value maxSX`;
+     float $minSYf   = `floatField -q -value minSY`;
+     float $maxSYf   = `floatField -q -value maxSY`;
+     float $minSZf   = `floatField -q -value minSZ`;
+     float $maxSZf   = `floatField -q -value maxSZ`;
+     float $minSXYZf = `floatField -q -value minSA`;
+     float $maxSXYZf = `floatField -q -value maxSA`;
+     float $minSUf   = `floatField -q -value minSU`;
+     float $maxSUf   = `floatField -q -value maxSU`;
+
+     string $originalSelection = `selectionString`;
+     if($cTXYZ == 0)
+          {
+              randTransition($minTXf, $maxTXf, $minTYf, $maxTYf, $minTZf, $maxTZf, $originalSelection);
+          }//end if
+     
+     else if($cTXYZ == 1)
+          {
+              randTransition($minTXYZf, $maxTXYZf, $minTXYZf, $maxTXYZf, $minTXYZf, $maxTXYZf, $originalSelection);
+          }//end else if
+
+     if($cRXYZ == 0)
+          {
+              randRotation  ($minRXf, $maxRXf, $minRYf, $maxRYf, $minRZf, $maxRZf, $originalSelection);
+          }//end else if
+
+     else if ($cRXYZ == 1)
+          {
+              randRotation  ($minRXYZf, $maxRXYZf, $minRXYZf, $maxRXYZf, $minRXYZf, $maxRXYZf, $originalSelection);
+          }//end else if
+
+     if($cSXYZ == 0 && $cUXYZ == 0)
+          {
+               randScale     ($minSXf, $maxSXf, $minSYf, $maxSYf, $minSZf, $maxSZf, $originalSelection);
+          }//end else if
+
+     else if($cSXYZ == 1)
+          {
+                randScale     ($minSXYZf, $maxSXYZf, $minSXYZf, $maxSXYZf, $minSXYZf, $maxSXYZf, $originalSelection);
+          }//end else if
+
+     else if($cUXYZ == 1)
+          {
+                UniformRandomScale     ($minSUf, $maxSUf,$originalSelection);
+          }//end else if
+
+     eval ($originalSelection);
+
+}//proc
+     //print("pr TZf " + $maxTZf);
+
+proc resetRandomFields()
+
+{
+     floatField -e -value 0 minTX;
+     floatField -e -value 0 minRX;
+     floatField -e -value 1 minSX;
+
+     floatField -e -value 0 maxTX;
+     floatField -e -value 0 maxRX;
+     floatField -e -value 1 maxSX;
+
+     floatField -e -value 0 minTY;
+     floatField -e -value 0 minRY;
+     floatField -e -value 1 minSY;
+
+     floatField -e -value 0 maxTY;
+     floatField -e -value 0 maxRY;
+     floatField -e -value 1 maxSY;
+
+     floatField -e -value 0 minTZ;
+     floatField -e -value 0 minRZ;
+     floatField -e -value 1 minSZ;
+
+     floatField -e -value 0 maxTZ;
+     floatField -e -value 0 maxRZ;
+     floatField -e -value 1 maxSZ;
+
+     floatField -e -value 0 minTA;
+     floatField -e -value 0 minRA;
+     floatField -e -value 1 minSA;
+     floatField -e -value 1 minSU;
+
+     floatField -e -value 0 maxTA;
+     floatField -e -value 0 maxRA;
+     floatField -e -value 1 maxSA;
+     floatField -e -value 1 maxSU;
+}//end proc
+
+global proc aboutStevesRandomWindow()
+{
+	if (`window -exists aboutStevesRandomWindow`)
+   {
+	deleteUI aboutStevesRandomWindow;
+   }//end if
+
+        int $width     = 240;
+        int $height    = 150;
+	string $name   = "\n Author:        Steve Eisenmann";
+        string $title  = "\n Title:            Steve's Random Utitlity";
+	string $date   = "\n Date:           10.13.07";
+        string $discr  = "\n Discription:  This utility can randomly Translate,";
+        string $discr1 = "\n                     Rotate, and Scale one or more";
+        string $discr2 = "\n                     objects.";
+        string $final  = "\n";
+        string $all    = ($name + $title + $date + $discr + $discr1 + $discr2 + $final);
+
+	window
+	    -title "Steve's Random Info"
+	    -rtf false
+	    -s   false
+	    -mnb true
+	    -mxb false
+	    -mb  on
+	    -mbv on
+	    -ip
+	    -ret
+	    -width $width
+ 	    -height $height
+	    aboutStevesRandomWindow;
+
+
+        columnLayout -adjustableColumn true;
+        text
+            -label $all
+            -align "left";
+        button -l "Steve-Eisenmann.com" -w 140 -al "center" -c "showHelp -absolute \"http://www.steve-eisenmann.com\"";
+
+	showWindow aboutStevesRandomWindow;
+}//end global proc
+
+global proc RandomWindow()
+{
+     int $width  = 250;
+     int $height = 325;
+     if ((`window -ex RandomWindow`) == true) deleteUI RandomWindow;
+     if (`windowPref -ex RandomWindow`) windowPref -r RandomWindow;
+	window
+	    -title "Steve's Random Utility"
+	    -rtf true
+	    -s   true
+	    -mnb true
+	    -mxb false
+	    -mb  on
+	    -mbv on
+	    -ip
+	    -ret
+	    -width $width
+ 	    -height $height
+	    RandomWindow;
+
+            menu
+                -label "Edit" ;
+            menuItem
+                -label "Reset Setting" -command resetRandomFields;
+            menu
+                -label "About";
+            menuItem
+                -label "Info" -command aboutStevesRandomWindow;
+        columnLayout -adjustableColumn true;
+        rowLayout
+            -numberOfColumns 4
+            -columnWidth 1 80
+            -columnWidth 2 80
+            -columnWidth 3 80
+            -columnAlign  1 left
+            -columnAlign  2 center
+            -columnAlign  3 center
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0
+            -columnAttach 3 both 0
+            -columnAttach 4 both 0;
+            text
+                -label "";
+
+            text
+                -label "Value 1"
+                -align "center";
+
+            text
+                -label "Value 2"
+                -align "center";
+            setParent..;
+            separator
+                -style "in";
+            //              Field Title   |   Field Names  |Field Active|CheckBox Visable | Checkbox Name | Field Value 1 | Field Value 2 | Field Type
+            randGuiSection("Translate X "  ,"minTX","maxTX"," true  "," false ","null" ," 0 "," 0 ", "0");
+            randGuiSection("Translate Y "  ,"minTY","maxTY"," true  "," false ","null" ," 0 "," 0 ", "0");
+            randGuiSection("Translate Z "  ,"minTZ","maxTZ"," true  "," false ","null" ," 0 "," 0 ", "0");
+            randGuiSection("XYZ "          ,"minTA","maxTA"," false "," true  ","TXYZ" ," 0 "," 0 ", "1");
+            separator
+                -style "in";
+
+            randGuiSection("Rotate X "     ,"minRX","maxRX"," true  "," false ","null" ," 0 "," 0 ", "0");
+            randGuiSection("Rotate Y "     ,"minRY","maxRY"," true  "," false ","null" ," 0 "," 0 ", "0");
+            randGuiSection("Rotate Z "     ,"minRZ","maxRZ"," true  "," false ","null" ," 0 "," 0 ", "0");
+            randGuiSection("XYZ "          ,"minRA","maxRA"," false "," true " ,"RXYZ" ," 0 "," 0 ", "2");
+            separator
+                -style "in";
+
+            randGuiSection("Scale X "      ,"minSX","maxSX"," true  "," false ","null" ," 1 "," 1 ", "0");
+            randGuiSection("Scale Y "      ,"minSY","maxSY"," true  "," false ","null" ," 1 "," 1 ", "0");
+            randGuiSection("Scale Z "      ,"minSZ","maxSZ"," true  "," false ","null" ," 1 "," 1 ", "0");
+            randGuiSection("XYZ "          ,"minSA","maxSA"," false "," true " ,"SXYZ" ," 1 "," 1 ", "3");
+            randGuiSection("Uniform "      ,"minSU","maxSU"," false "," true " ,"UXYZ" ," 1 "," 1 ", "3");
+            separator
+                 -style "in";
+        rowLayout
+            -numberOfColumns 3
+            -columnWidth  1 1
+            -columnWidth  2 125
+            -columnWidth  3 125
+            -columnAlign  1 left
+            -columnAlign  2 center
+            -columnAlign  3 center
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0
+            -columnAttach 3 both 0;
+
+        text
+            -label ""
+            -align "right";;
+
+	button
+            -label "Apply"
+            -align "center"
+            -width ($width * .5)
+            -command "passFields1";
+	button
+            -label "Close"
+            -align "center"
+            -width ($width * .5)
+            -command "deleteUI RandomWindow";
+	showWindow RandomWindow;
+}//global proc
+
+RandomWindow;

@@ -1,0 +1,23 @@
+
+global proc DisableCaustics()
+{
+	string $CausticsDisable[] = `ls -sl`;
+
+	if (size($CausticsDisable) == 0) {
+ 	error "Select object to disable";
+ 	}
+	
+
+	int $CaDaSz = (size($CausticsDisable));
+
+	for ($j = 0; $j <= $CaDaSz; $j++)
+		{ 
+		
+		select -r $CausticsDisable[$j];
+		
+	        setAttr ($CausticsDisable[$j] + ".miDeriveFromMaya") 0;
+		setAttr ($CausticsDisable[$j] + ".miCaustic") 1;
+		}
+		
+		select -cl;
+	}

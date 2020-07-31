@@ -1,0 +1,36 @@
+proc building () {
+
+	float $height = `rand 2.0 0.2`;
+	float $width  = `rand 1.1 0.2`;
+	float $depth  = `rand 1.1 0.2`;
+
+	polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1;
+        move -r 0 -0.5 0 pCube1.scalePivot pCube1.rotatePivot ;
+	move -r 0  0.5 0;
+
+	select -r pCube1.f[1];
+	move -r 0 $height 0;
+	
+	select -r pCube1;
+	scale  -r $width 1 $depth;
+	makeIdentity -apply true -t 1 -r 1 -s 1 -n 0;
+
+	rename "pCube1" "building";
+	}
+global proc fieldGen() {
+
+	//building ();
+	//select -r building;
+	string $BuildingArray[];
+	for ($i = 0; $i < 500; $i++){
+		int $j = ($i + 23);
+		$BuildingArray[$i] = `building`;
+		//select -r ($BuildingArray[$i] + 1);
+		duplicate -rr;
+		if (($i % 23) != 0)
+		move -r  ($j * -1) 0 0;
+		else
+		move -r -os -23 0  ($i / 23);
+		
+	}
+}

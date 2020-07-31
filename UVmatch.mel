@@ -1,0 +1,46 @@
+
+proc RandomMovement(){
+
+	float $Rx = `rand 0.05 -0.05`;
+	float $Ry = `rand 0.05 -0.05`;
+	float $Rz = `rand 0.05 -0.05`;
+	move -r $Rx $Ry $Rz;
+}
+
+global proc ObjectNoise2()
+{
+	string $BuildingArray[] = `ls -sl`;
+
+	if (size($BuildingArray) == 0) {
+ 	error "Select at least one PolygonMesh";
+ 	}
+
+	string $oldName[] = `ls -sl`;
+	
+	int $BuArSz = (size($BuildingArray));
+
+	for ($j = 0; $j <= $BuArSz; $j++)
+		{ 
+		
+		select -r $BuildingArray[$j];
+		rename $BuildingArray[$j]"polyDistortion";
+		//print $BuildingArray[$j];
+		
+		int $verts[] = `polyEvaluate -v`;
+		DeleteHistory;
+		
+		//print $verts "verts ";
+		//print("\n");
+		
+		//This sets the loop equal to the number of verts in the object
+		int $f = 0;
+		while ($f <= $verts[0]){
+	
+		select -r polyDistortion.vtx[$f];	
+		RandomMovement;
+		$f = $f+1;
+		}
+	rename "polyDistortion" $oldName[$j];
+	select -cl;
+	}
+}

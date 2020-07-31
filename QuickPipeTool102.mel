@@ -1,0 +1,103 @@
+//Author:  Steve Eisenmann
+//Title:   QuickPipeTool
+//Date:    8.31.07
+//Version: 1.01
+//Discription: This Tool will create a tube that follows the profile normal of the path.
+//             The Path is created based on the center points of the selected objects
+//             The script also creates cluster Points on the cv's and then parents the
+//             cluster to the original object.
+
+global proc QuickPipeTool(int $degree)
+     {
+       string $OriginalSelection[] = `GetSelection`;
+       StringBuilder;
+       string $StringBuilderSelection[] =`GetSelection`;
+       CreatePipe;
+       string $SBS = $StringBuilderSelection[0];
+       ControlCluster($SBS, $OriginalSelection);
+     }
+proc ControlCluster(string $name, string $originalSelection[])
+     {
+      string $curveName = $name;
+      int $selectionArraySize = (size($originalSelection));
+      for($i = 0; $i < $selectionArraySize; $i++)
+         {
+          select -r ($curveName +".cv"+"["+$i+"]");
+          newCluster " -envelope 1";
+          string $temp[] = `ls -sl`;
+          rename $temp[0] ($curveName + $i + "Cluster");
+          select -r ($curveName + $i + "Cluster") $originalSelection[$i];
+          parent;
+          setAttr (($curveName + $i + "Cluster") + ".visibility") 0;
+         }
+     }
+proc CreatePipe()
+{
+     string $selectionArray[] = `GetSelection`;
+     if( `objExists masterCircle` )
+     {
+       extrude -ch true -rn false -po 3 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 "masterCircle" $selectionArray[0];
+     }
+     else
+     {
+     circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 1 -d 3 -ut 0 -tol 0.000328084 -s 8 -ch 1 -n masterCircle;
+     extrude -ch true -rn false -po 3 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 "masterCircle" $selectionArray[0];
+     setAttr -lock true -keyable false "masterCircle.tx";
+     setAttr -lock true -keyable false "masterCircle.ty";
+     setAttr -lock true -keyable false "masterCircle.tz";
+     setAttr -lock true -keyable false "masterCircle.rx";
+     setAttr -lock true -keyable false "masterCircle.ry";
+     setAttr -lock true -keyable false "masterCircle.rz";
+     }
+     if( `objExists PipeLayer` )
+     {
+       editDisplayLayerMembers -noRecurse PipeLayer `ls -selection`;
+     }
+     else
+     {
+       createDisplayLayer -name "PipeLayer" -number 1 -empty;
+       editDisplayLayerMembers -noRecurse PipeLayer `ls -selection`;
+     }
+}
+proc string[] GetSelection()
+{
+     string $selArray[] = `ls -sl`;
+     return $selArray;
+     if (size($selArray) == 0)
+        {
+          error "Select at least one Object";
+        }
+}
+proc StringBuilder()
+{
+     string $begin = "curve -d 1 ";
+     string $selectionArray[] = `GetSelection`;
+     string $extend;
+     string $finalize;
+     int $selectionArraySize = (size($selectionArray));
+     int $j;
+     for ($j = 0; $j <= $selectionArraySize - 1; $j++)
+        {
+          select -r $selectionArray[$j];
+       	  string $x = `objectCenter -x $selectionArray[$j]`;
+          string $y = `objectCenter -y $selectionArray[$j]`;
+          string $z = `objectCenter -z $selectionArray[$j]`;
+       	  string $point = "-p ";
+       	  string $space = " ";
+       	  string $k = "-k ";
+       	  string $jCount = $j;
+       	  string $kCount = $kCount + $k + $jCount + $space;
+       	  $extend = $extend + $point + $x + $space + $y + $space + $z + $space;
+          select -cl;
+          if( (int)$j == (int)$selectionArraySize -1 )
+               {
+                $finalize = $begin + $extend + $kCount;
+                eval ($finalize);
+                }
+
+        }
+    }
+
+
+
+
