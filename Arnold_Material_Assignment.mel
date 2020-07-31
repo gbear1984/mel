@@ -177,9 +177,10 @@ proc string seAttrRecordRead()
      }
 }
 
-proc seAssignAttrFromFile(int $debug)
+proc seAssignAttrFromFile(int $debug, string $userNameSpace)
 {
   int $i = 0;
+  string $namespace = $userNameSpace;
   string $file = seAttrRecordRead();
   $hdFileArray = stringToStringArray($file, " ");
   int $getSelectionArraySize = (size($hdFileArray)); 
@@ -198,25 +199,67 @@ proc seAssignAttrFromFile(int $debug)
       while ($i < $getSelectionArraySize)
       {
           
-          if(`objExists $hdFileArray[$i]`)//skip if shape doesn't exist
+          if(`objExists ($namespace+$hdFileArray[$i])`)//skip if shape doesn't exist
           {
-              if(`seSoloAttrExists($hdFileArray[$i])` == 0)
+              if(`seSoloAttrExists(($namespace+$hdFileArray[$i]))` == 0)
               {
-                  seSoloCreateCustomShapeAttr($hdFileArray[$i]);
+                    seSoloCreateCustomShapeAttr(($namespace+$hdFileArray[$i]));
+                    //print "seSoloCreateCustomShapeAttr";
               }
-              if(`seSoloAttrExists($hdFileArray[$i])` == 1)
+              if(`seSoloAttrExists(($namespace+$hdFileArray[$i]))` == 1)
               {    
                   //seSoloAttrExists($hdFileArray[$i+1]);
-                  seSoloEditCustomShapeAttr($hdFileArray[$i], $hdFileArray[$i+1]);
+                  seSoloEditCustomShapeAttr(($namespace+$hdFileArray[$i]), $hdFileArray[$i+1]);
                   if($hdFileArray[$i+2] != "initialShadingGroup")//skip if shading group is default
                   {
-                      seShaderAssignment($hdFileArray[$i], $hdFileArray[$i+2]);
+                      seShaderAssignment(($namespace+$hdFileArray[$i]), $hdFileArray[$i+2]);
+                      //print (($namespace+$hdFileArray[$i])+" "+$hdFileArray[$i+2]+"\n");
                   }
                }   
            }
-          $i=$i+3; 
+          $i=$i+3;
+          //print ($i+ " "); 
       }
     }
 }
+/*This file contains many scripts the only important ones are below this text
+
+seCreateAttrListFile();
+*  This command should be run on a freshly imported scene.
+   it will create a file that will be used to add a custom attribute to shape nodes
+   and it will also record their shader connections
+
+seAssignAttrFromFile(0, "");
+*  This command is used to add custom attributes to shape nodes and assign any existing
+   materials previously recorded by seCreateAttrFile();
+   
+To run the commands
+* first select all of this script and right click with the mouse and 
+  select Execute. This will load the script into memory.
+
+* Then select all the geometery from the outliner you want to be recorded when you run the script. 
+  The top group node is probably the best.
+  
+* In the script window run the command seCreateAttrListFile(); 
+  You can type it or just highlight it below and Execute it.
+  
+* After the script completes it will say a file has been created. 
+  It will be in the data directory of the current project.
+  
+  it will look something like this 
+  file output to: /jobs/ads/dairy_queen_jump_in_J603864/build/enFarmSet/m_enFarmSet/data/build_enFarmSet_testOnly_modeling_v000_s001_attrRecord.txt
+  
+*seAssignAttrFromFile(0, "");
+To run this command you must have first run seAssignAttrFromFile on something in your current project.
+
+if your seAssignAttrFromFile file was genereted from the current scene file
+*  highlight or type seAssignAttrFromFile(0, ""); and execute the command
+   this will source that file and create or assign the mota_constant_texValue to any matching shape nodes found
+   and assign any matching materials to current geo
+
+if your seAssignAttrFromFile was generated in another file then tell me and I will give a hardcode path workaround.
+
+
+*/
 //seCreateAttrListFile();
-//seAssignAttrFromFile(0);
+//seAssignAttrFromFile(0, "");
