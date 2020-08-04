@@ -1,3 +1,38 @@
+proc string sePrintShapes()
+{
+     select -hierarchy;
+     string $getSelection[] = `ls -sl`;
+     int $getSelectionArraySize = (size($getSelection));
+     string $shapeNames = "";
+     for ($i = 0; $i <= $getSelectionArraySize; $i++)
+        {
+            string $selector = ($getSelection[$i]);
+            if( `objExists $getSelection[$i]` ) {
+                //string $shapeSelector[] = `ls -shapes -dag $selector`;
+                //print ($shapeSelector[$i]+" "+$i+"\n");
+                string $nameSpace[] = `ls -shapes -dag $getSelection[$i]`;
+                $shapeNames = $shapeNames + (" *"+`seShaveNameSpace($nameSpace[0])`+"* ");
+                
+                
+                //print ($getSelection[$i]);
+                //print $i;
+                }//if
+         }//loop
+         return $shapeNames;
+}//proc
+
+proc string seShaveNameSpace(string $nameSpace)
+{
+    string $path = $nameSpace;
+    string $scrubString = `encodeString $path`;    
+    int    $stringSize    =`size($scrubString)`;    
+    int    $newStringSize = $stringSize-5;
+    string $fixedString = endString($path, $newStringSize);
+    return $fixedString;   
+}
+
+
+
 proc seSoloCreateCustomShapeAttr(string $Solo)
 {
             if( `objExists $Solo` ) {
@@ -149,7 +184,7 @@ proc seCreateAttrListFile()
             }//if
          }//loop
          fclose $fileId;
-         seAssignAttrFromFile(1);//print attr list
+         seAssignAttrFromFile(1, "");//print attr list
          print ("file output to: "+$filepath);
  }//proc
  
