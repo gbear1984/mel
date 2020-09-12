@@ -1,3 +1,5 @@
+
+
 global proc seRandomColorAssign(string $name,int $materialCreate, float $R, float $G, float $B)
 {
  //       source "C:/Documents and //Settings/Administrator/Desktop/MultiExtrude.mel";
@@ -13,11 +15,14 @@ global proc seRandomColorAssign(string $name,int $materialCreate, float $R, floa
 	
 	for ($i = 0; $i <= $materialCreate; $i++)
 	{
-	    shadingNode -n ($name+"_"+$i+"_MTL_") -asShader phong;	
-	    sets -renderable true -noSurfaceShader true -empty -name ($name+"_"+$i+"_MTL_" + "SG");
-	    connectAttr -f ($name+"_"+$i+"_MTL_" + ".outColor") ($name+"_"+$i+"_MTL_" + "SG.surfaceShader");
-	    setAttr ( $name+"_"+$i+"_MTL_"+".color") -type double3 (`rand 0 $R`) (`rand 0 $G`) (`rand 0 $B`) ;
-	    $shaderNames = ($shaderNames +" "+$name+"_"+$i+"_MTL_");	    
+	    if(`objExists($name+"_"+$i+"_MTL_"+"SG")`==0)
+	    {
+	        shadingNode -n ($name+"_"+$i+"_MTL_") -asShader phong;	    
+	        sets -renderable true -noSurfaceShader true -empty -name ($name+"_"+$i+"_MTL_" + "SG");
+	        connectAttr -f ($name+"_"+$i+"_MTL_" + ".outColor") ($name+"_"+$i+"_MTL_" + "SG.surfaceShader");
+	        setAttr ( $name+"_"+$i+"_MTL_"+".color") -type double3 (`rand 0 $R`) (`rand 0 $G`) (`rand 0 $B`) ;
+	     }
+	     $shaderNames = ($shaderNames +" "+$name+"_"+$i+"_MTL_");	    	   
 	}
 	
 	string $shaderNameList[];
@@ -31,4 +36,4 @@ global proc seRandomColorAssign(string $name,int $materialCreate, float $R, floa
 		  sets -e -forceElement ($shaderNameList[$randSelect] + "SG");
 	}
 }
-//seRandomColorAssign cardboard 4 .35 .325 .13
+//seRandomColorAssign plasticWrap 0 .8 .8 .13
