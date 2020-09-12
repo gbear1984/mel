@@ -1,0 +1,34 @@
+global proc RandomColorAssign(string $name,int $materialCreate, float $R, float $G, float $B)
+{
+ //       source "C:/Documents and //Settings/Administrator/Desktop/MultiExtrude.mel";
+	string $ColorArray[] = `ls -sl`;
+	string $shaderNames = "";
+
+	if (size($ColorArray) == 0) {
+ 	error "Select at least one Renderable Object";
+ 	}
+	
+	int $colorArraySize = (size($ColorArray));
+	int $randSelect = 0;
+	
+	for ($i = 0; $i <= $materialCreate; $i++)
+	{
+	    shadingNode -n ($name+$i) -asShader phong;	
+	    sets -renderable true -noSurfaceShader true -empty -name ($name+$i + "SG");
+	    connectAttr -f ($name+$i + ".outColor") ($name+$i + "SG.surfaceShader");
+	    setAttr ( $name+$i+".color") -type double3 (`rand 0 $R`) (`rand 0 $G`) (`rand 0 $B`) ;
+	    $shaderNames = ($shaderNames +" "+$name+$i+"_MTL");	    
+	}
+	
+	string $shaderNameList[];
+	$shaderNameList = stringToStringArray($shaderNames, " ");
+	int $shaderNameArraySize = (size($shaderNameList));
+	
+	for ($j = 0; $j < $colorArraySize; $j++)
+	{ 
+        $randSelect = `rand 0 $shaderNameArraySize`;
+		  select -r $ColorArray[$j];
+		  sets -e -forceElement ($shaderNameList[$randSelect] + "SG");
+	}
+}
+//RandomColorAssign cardboard 4 .35 .325 .13
