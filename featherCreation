@@ -1,0 +1,65 @@
+proc string seAddPadding(int $num,int $padding)
+{ 
+    int $lengthNum=size(string($num)) ;
+    string $padString;
+    if($lengthNum < $padding) 
+    for($i=0;$i<($padding-$lengthNum);$i++) 
+    $padString=$padString+"0" ; 
+    return $padString+string($num) ; 
+ }
+ proc seBarbBuilder(string $barbName, float $x1, float $y1, float $x2, float $y2)
+{
+     string $begin = ("curve -d 1 -n "+$barbName+" ");
+     string $extend;
+     string $finalize;
+     string $point = " -p ";
+     string $space = " ";
+     string $ending = " -k 0 -k 1 ";
+     $extend = $point + $x1 + $space + $y1 + $space + 0 + $space + $point + $x2 + $space + $y2 + $space + 0 + $space;
+     $finalize = $begin + $extend + $ending;
+     eval ($finalize);
+}
+proc seArnoldCurveRendering(string $CurveName)
+{
+   setAttr ($CurveName+".aiRenderCurve") 1;
+   connectAttr -force aiStandardSurface2.outColor ($CurveName+".aiCurveShader"); 
+   connectAttr -f remapValue1.outValue ($CurveName+".aiCurveWidth");
+   setAttr ($CurveName+".aiMode") 1;
+   setAttr ($CurveName+".aiSampleRate") 40;
+}
+
+proc int sePointOnCurveCoordinate(string $name,int $oldCount, float $featherStands, float $degree)
+{
+    int    $featherSpans      = `getAttr ($name+".spans")`;
+    int    $count             = 0 + $oldCount;
+    string $paddedCount       = 0;
+    float  $i                 = 0.00;
+    float  $increment         =  1/(($featherStands/$featherSpans)/2);//Calibrated to featherStands amount
+    float  $barb_Angle        = tand($degree);
+    float  $barb_Y_Intercept  = 0.00;
+    float  $barb_Y_Drop       = 0.00;
+    float  $barb_Y_Drop_Final = 0.00;
+    while( $i < $featherSpans)
+    {
+        float $pointArray[] = `pointPosition ($name+".u["+$i+"]")`;
+        $barb_Y_Intercept = $pointArray[0] * $barb_Angle;
+        $barb_Y_Drop_Final = ($pointArray[1]-(abs($pointArray[0]) * $barb_Angle));
+        $i= $i + $increment;
+        $count++;
+        $paddedCount = seAddPadding($count, 4);
+        string $barbName = ("featherBarb_"+$paddedCount);
+        seBarbBuilder($barbName, $pointArray[0], $pointArray[1],0,$barb_Y_Drop_Final);
+        rename ("|"+$barbName+"|curveShape1") ($barbName+"_shape");
+        //seArnoldCurveRendering($barbName+"_shape");                           
+    }
+    return $count;
+}
+
+ proc seFeatherAssetCreator()
+{
+    int $counter = 0;
+    float $degree = 45;
+    float $featherStands = 500;
+    $counter = sePointOnCurveCoordinate("Primary_Feather_Curve_2", 0,  $featherStands, $degree);
+    sePointOnCurveCoordinate("Primary_Feather_Curve_1", $counter,  $featherStands, $degree);        
+}
