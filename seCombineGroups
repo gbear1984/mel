@@ -1,0 +1,53 @@
+proc seCombineGroups()
+{
+    string $topNode[] = `ls -sl`;
+    string $prefix    = "unity_";//GroupNode Prefix
+    string $postfix   = "_GEO";
+    string $postfix2  = "_DUP";    
+    string $groupName = ($prefix+$topNode[0]);    
+    string $objectInSelection[] = `listRelatives -type transform`;//store all transforms below top node
+    
+    //---------------------Error Checking-------------------------//
+    if(size($topNode) != 1)//make sure this is one 1 item selected
+    {
+        error "Select top group node only";
+    }
+    
+    if(`objExists $groupName`|| startsWith($topNode[0],$prefix)==1)//don't overwrite existing combined data
+    {
+        error ("Duplicated group already exists rename or delete "+$topNode[0]+" and rerun command");
+    }
+    
+    group -empty -name $groupName;//create combined group node
+    
+    for($i in $objectInSelection) 
+        {
+             duplicate -name ($i+$postfix2) $i;//Duplicate Objects 1 layer Hierarchy
+             parent    -w ($i+$postfix2);
+             select       ($i+$postfix2);
+             select    -hierarchy;         
+             string $polyUniteList[] = `ls -sl`;
+             if(size($polyUniteList) > 3)//Unite Grouped Geometry//Rename//Parent to group node
+                 {
+                     polyUnite -n ($i+$postfix);
+                     delete    -ch;
+                     parent       ($i+$postfix) $groupName; 
+                  }
+      
+             if(size($polyUniteList) < 3 && size($polyUniteList) > 1)//Move Groups that don't meet Unite Conditions
+                 {
+                     parent ($i+$postfix2) $groupName;                     
+                  }//if       
+        }//for
+    select $groupName;
+    string $duplicatedObjectInSelection[] =  `listRelatives -type transform`;
+    
+    for($i in $duplicatedObjectInSelection)//Check for odd named geo
+        {
+            if(endsWith($i,$postfix2)==1)
+            {
+                string $newName = stringRemovePrefix($i, $postfix2);
+                rename $i ($newName+$postfix);
+            }
+        }
+}//proc
