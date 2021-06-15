@@ -1,0 +1,37 @@
+proc seCombineGroups()
+{
+    string $topNode[] = `ls -sl`;    
+    string $groupName = ("unity_"+$topNode[0]);    
+    string $objectInSelection[] = `listRelatives -type transform`;
+
+    if(size($topNode) != 1)//make sure this is one 1 item selected
+    {
+        error "Select top group node only";
+    }
+    
+
+    group -empty -name $groupName;//create combined group node
+    
+    for($i in $objectInSelection) 
+        {
+             duplicate -name ($i+"_dup") $i;//Duplicate Objects 1 layer Hierarchy
+             parent -w ($i+"_dup");
+             select ($i+"_dup");
+             select -hierarchy;         
+             string $polyUniteList[] = `ls -sl`;
+         
+             if(size($polyUniteList) > 3)//Unite Grouped Geometry//Rename//Parent to group node
+                 {
+                     polyUnite -n ($i+"_GEO");
+                     delete -ch;
+                     parent  ($i+"_GEO") $groupName; 
+                  }
+      
+             if(size($polyUniteList) < 3 && size($polyUniteList) > 1)//Move Groups that don't meet Unite Conditions
+                 {
+                     parent ($i+"_dup") $groupName;
+                     
+                  } 
+      
+        }
+}
