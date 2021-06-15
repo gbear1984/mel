@@ -1,0 +1,22 @@
+ls -sl;
+//select -r -hi;
+string $objectInSelection[] = `listRelatives -type transform`;
+int $j = 0;
+for($i in $objectInSelection)
+    {
+
+     //string $shape = `listConnections -sh $i`;
+     //print ($i+"\n");
+     duplicate -name ($i+"_dup") $i;
+     parent -w ($i+"_dup");
+     select ($i+"_dup");
+     select -hierarchy;         
+     string $polyUniteList[] = `ls -sl`;
+     print (size($polyUniteList)+"\n");
+     if(size($polyUniteList) > 3)
+     {
+         polyUnite;
+         delete -ch;
+      }
+    }
+//listConnections -sh a"pTorusShape3"
