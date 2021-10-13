@@ -1,3 +1,7 @@
+/*Place This file in the mel command editor
+and execute it to create new color ramps*/
+
+
 proc string seGetSceneName()
 {
     string $path = `file -q -sceneName -shortName`;
@@ -25,11 +29,34 @@ proc string seGetSceneName()
     }
     return $coordinatesFilePath; 
 }
-proc string seAttrRecordRead()
+
+proc int seGetAngleSampling(int $mode)
+{    
+     string $file = seAttrRecordRead($mode);
+     $hdFileArray = stringToStringArray($file, "\t");
+     int $getSelectionArraySize = (size($hdFileArray));
+     return ($getSelectionArraySize/3); 
+}
+
+proc string seAttrRecordRead(int $mode)
 {
      //string $filepath = seGetFilePath();
-     //string $filepath = "C:/Users/smeis/Desktop/outdoorReflectance.txt";
-     string $filepath = "C:/Users/smeis/Desktop/transmission.txt";
+     string $filepath = "";
+     if($mode == 1)
+     {
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance.txt";
+         
+     }
+     if($mode == 2)
+     {
+       //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance.txt";
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance.txt";
+     }
+     if($mode == 3)
+     {
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission.txt";
+         
+     }
      string $strFileContent = "";
      string $hdFileArray[];
      $hdFile = `fopen $filepath "r"`;
@@ -50,13 +77,14 @@ proc string seAttrRecordRead()
          return "no file path found";
      }
 }
-proc seRamp(string $rampName)
+seAttrRecordRead(2);
+
+proc seRamp(string $rampName)//initialize a new ramp
 {
     shadingNode -asTexture ramp -name $rampName;
-    //$rampName = "rampName";
-    shadingNode -asUtility place2dTexture -name ($rampName+"2D");
-    connectAttr ($rampName+"2D.outUV") ($rampName+".uv");
-    connectAttr ($rampName+"2D.outUvFilterSize") ($rampName+".uvFilterSize");
+    shadingNode -asUtility place2dTexture -name ($rampName+"_2D");
+    connectAttr ($rampName+"_2D.outUV") ($rampName+".uv");
+    connectAttr ($rampName+"_2D.outUvFilterSize") ($rampName+".uvFilterSize");
 }
 
 
@@ -65,22 +93,39 @@ proc seSetRamp(string $rampName, float $red, float $green, float $blue, float $a
     setAttr ($rampName+".colorEntryList["+$j+"].color") -type double3 $red $green $blue;
     setAttr ($rampName+".colorEntryList["+$j+"].position") $angle; 
 }
-//seRamp("testRamp");
-//seSetRamp("testRamp", 1.0, .6, .3, .323, 2);
-//seSetRamp("testRamp", 1.0, .3, .1, .5, 3);
-proc seAssignAttrFromFile(int $debug, string $userNameSpace)
+proc seAssignAttrFromFile(int $debug, string $userNameSpace,int $mode, int $version)
 {
-  int    $i = 0;
-  int    $j = 0;
-  string $namespace = $userNameSpace;
-  string $file = seAttrRecordRead();
-         $hdFileArray = stringToStringArray($file, "\t");
+  int    $i                     = 0;
+  int    $j                     = 0;
+  int    $loopMax               = seGetAngleSampling($mode);
+  string $namespace             = $userNameSpace;
+  string $file                  = seAttrRecordRead($mode);
+  
+  string $insideReflectionRamp  = ("insideReflectionRamp" +"_v0"+$version);
+  string $outsideReflectionRamp = ("outsideReflectionRamp"+"_v0"+$version);
+  string $transmissionRamp      = ("transmissionRamp"     +"_v0"+$version);
+
+         $hdFileArray           = stringToStringArray($file, "\t");
   int    $getSelectionArraySize = (size($hdFileArray)); 
-  float  $angleAmount = 0.0;
-  float  $angle = 1.0/90.0;
-  float  $red   = 0.0;
-  float  $green = 0.0;
-  float  $blue  = 0.0;
+  float  $angleAmount           = 0.0;
+  float  $angle                 = 1.0/ $loopMax;//Normalize Data sample increments 
+  float  $red                   = 0.0;
+  float  $green                 = 0.0;
+  float  $blue                  = 0.0;
+  
+  //Create 
+  if($mode == 1)
+  {
+    seRamp($insideReflectionRamp);
+  }
+  if($mode == 2)
+  {
+    seRamp($outsideReflectionRamp);
+  }
+  if($mode == 3)
+  {
+    seRamp($transmissionRamp);
+  }  
   //print $getSelectionArraySize;
   //switch to 1 if print out need list is required
   if ($debug == 1)
@@ -93,19 +138,31 @@ proc seAssignAttrFromFile(int $debug, string $userNameSpace)
   }
   if ($debug == 0)
   {
-      while ($i < $getSelectionArraySize)
+      while ($j < $loopMax)
       {
           //print (" color " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + " " + $hdFileArray[$i+3] + " angle " + $angleAmount + "\n")
           //seRamp("transmissionRamp");
           $red   = float($hdFileArray[$i+1])/255.00;
           $green = float($hdFileArray[$i+2])/255.00;
           $blue  = float($hdFileArray[$i+3])/255.00;
-          seSetRamp("transmissionRamp", $red, $green, $blue, $angleAmount, $j);
+          if($mode == 1)
+          {
+              seSetRamp($insideReflectionRamp,   $red, $green, $blue, $angleAmount, $j);
+          }
+          if($mode == 2)
+          {
+              seSetRamp($outsideReflectionRamp,  $red, $green, $blue, $angleAmount, $j);
+          }
+          if($mode == 3)
+          {
+              seSetRamp($transmissionRamp,       $red, $green, $blue, $angleAmount, $j);
+          }
           $angleAmount = $angleAmount + ($angle);
           $i=$i+3;
-          $j=$j+1;
-          //print ($i + " i \n"); 
+          print ($j+ " j \n");
+          $j=$j+1;//J is used to set the color angle value in seSetRamp
+ 
       }
     }
 }
-seAssignAttrFromFile(0, "");
+seAssignAttrFromFile(0, "", 2,2);
