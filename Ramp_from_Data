@@ -1,8 +1,6 @@
 /*Place This file in the mel command editor
 and execute it to create new color ramps*/
 
-
-
 proc int seDetermineOS()
 {
     
@@ -17,14 +15,14 @@ proc int seDetermineOS()
     }
 }
 
-
 proc string seGetSceneName()
 {
-    string $path = `file -q -sceneName -shortName`;
-    string $scrubString = `encodeString $path`;    
-    int    $stringSize    =`size($scrubString)`;    
-    int    $newStringSize = $stringSize-3;
-    string $fixedString = startString($path, $newStringSize);
+    string $path          = `file -q -sceneName -shortName`;
+    string $scrubString   = `encodeString $path`;    
+    int    $stringSize    = `size($scrubString)`;    
+    int    $newStringSize =  $stringSize-3;
+    string $fixedString   =  startString($path, $newStringSize);
+    
     return $fixedString;   
 }
 
@@ -34,23 +32,25 @@ proc string seGetSceneName()
     string $currentSceneName = `seGetSceneName`;
     string $coordinatesFilePath = ( $filePath +"/"+$currentSceneName+"_attrRecord.txt" );    
     //check permissions
-    $dirChk = `filetest -w ($filePath+"/")`;
-    $fileChk = `filetest -w $coordinatesFilePath`;
+    $dirChk    =  `filetest -w ($filePath+"/")`;
+    $fileChk   =  `filetest -w $coordinatesFilePath`;
     int $debug = 0;
     if($debug == 1)
     {
-        print ($coordinatesFilePath + "\n");
-        print ("Dir Check: " + $dirChk + "\n");
+        print ($coordinatesFilePath      + "\n");
+        print ("Dir Check: "  + $dirChk  + "\n");
         print ("File Check: " + $fileChk + "\n");
     }
+    
     return $coordinatesFilePath; 
 }
 
 proc int seGetAngleSampling(int $mode, int $version)
 {    
-     string $file = seAngleRecordRead($mode, $version);
-     $hdFileArray = stringToStringArray($file, "\t");
+     string $file               = seAngleRecordRead($mode, $version);
+     $hdFileArray               = stringToStringArray($file, "\t");
      int $getSelectionArraySize = (size($hdFileArray));
+     
      return ($getSelectionArraySize/3); 
 }
 
@@ -60,20 +60,18 @@ proc string seAngleRecordRead(int $mode, int $version)
      string $filepath = "";
      if($mode == 1)
      {
-        //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance.txt";
           $filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance_V0"+$version+".txt";        
      }
      if($mode == 2)
      {
 
-       //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance.txt";
          $filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance_V0"+$version+".txt";
      }
      if($mode == 3)
      {
-       //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission.txt";
          $filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission_V0"+$version+".txt";
      }
+     
      string $strFileContent = "";
      string $hdFileArray[];
      $hdFile = `fopen $filepath "r"`;
@@ -94,22 +92,24 @@ proc string seAngleRecordRead(int $mode, int $version)
          return "no file path found";
      }
 }
-//seAngleRecordRead(2);
 
 proc seRamp(string $rampName)//initialize a new ramp
 {
-    shadingNode -asTexture ramp -name $rampName;
-    shadingNode -asUtility place2dTexture -name ($rampName+"_2D");
-    connectAttr ($rampName+"_2D.outUV") ($rampName+".uv");
-    connectAttr ($rampName+"_2D.outUvFilterSize") ($rampName+".uvFilterSize");
+    if(objExists($rampName) == 0)
+    { 
+        shadingNode -asTexture ramp -name $rampName;
+        shadingNode -asUtility place2dTexture -name ($rampName+"_2D");
+        connectAttr ($rampName+"_2D.outUV") ($rampName+".uv");
+        connectAttr ($rampName+"_2D.outUvFilterSize") ($rampName+".uvFilterSize");
+    }
 }
-
 
 proc seSetRamp(string $rampName, float $red, float $green, float $blue, float $angle, int $j)
 {
     setAttr ($rampName+".colorEntryList["+$j+"].color") -type double3 $red $green $blue;
     setAttr ($rampName+".colorEntryList["+$j+"].position") $angle; 
 }
+
 proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
 {
   int    $i                     = 0;
@@ -133,15 +133,15 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   //Create 
   if($mode == 1)
   {
-    seRamp(($insideReflectionRamp+$rampVersion));
+      seRamp(($insideReflectionRamp+$rampVersion));
   }
   if($mode == 2)
   {
-    seRamp(($outsideReflectionRamp+$rampVersion));
+      seRamp(($outsideReflectionRamp+$rampVersion));
   }
   if($mode == 3)
   {
-    seRamp(($transmissionRamp+$rampVersion));
+      seRamp(($transmissionRamp+$rampVersion));
   }  
   //print $getSelectionArraySize;
   //switch to 1 if print out need list is required
@@ -193,7 +193,6 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
       }
     }
 }
-//(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
 
 seCreateRampFromFile(0 /*debug*/,
                      ""/*NameSpace can leave blank*/,
@@ -208,7 +207,7 @@ seCreateRampFromFile(0 /*debug*/,
                      2 /*Mode Which ramp 1 2 3*/,
                      2 /*Ramp File Version"*/,
                      3 /*Ramp Maya Version"*/,
-                     3 /*Ramp Data Sturcture Tuple or Quad*/
+                     4 /*Ramp Data Sturcture Tuple or Quad*/
                      );//Outside Reflection
 
 seCreateRampFromFile(0 /*debug*/,
@@ -216,5 +215,5 @@ seCreateRampFromFile(0 /*debug*/,
                      1 /*Mode Which ramp 1 2 3*/,
                      2 /*Ramp File Version"*/,
                      3 /*Ramp Maya Version"*/,
-                     3 /*Ramp Data Sturcture Tuple or Quad*/
+                     4 /*Ramp Data Sturcture Tuple or Quad*/
                      );//Inside Reflection
