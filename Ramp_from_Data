@@ -2,6 +2,22 @@
 and execute it to create new color ramps*/
 
 
+
+proc int seDetermineOS()
+{
+    
+    if (`about -nt` == 1)
+    {
+        return 1;
+    }
+    if (`about -linux` == 0)
+    {
+        return 0;
+        
+    }
+}
+
+
 proc string seGetSceneName()
 {
     string $path = `file -q -sceneName -shortName`;
@@ -30,32 +46,33 @@ proc string seGetSceneName()
     return $coordinatesFilePath; 
 }
 
-proc int seGetAngleSampling(int $mode)
+proc int seGetAngleSampling(int $mode, int $version)
 {    
-     string $file = seAttrRecordRead($mode);
+     string $file = seAngleRecordRead($mode, $version);
      $hdFileArray = stringToStringArray($file, "\t");
      int $getSelectionArraySize = (size($hdFileArray));
      return ($getSelectionArraySize/3); 
 }
 
-proc string seAttrRecordRead(int $mode)
+proc string seAngleRecordRead(int $mode, int $version)
 {
      //string $filepath = seGetFilePath();
      string $filepath = "";
      if($mode == 1)
      {
-         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance.txt";
-         
+        //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance.txt";
+          $filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance_V0"+$version+".txt";        
      }
      if($mode == 2)
      {
+
        //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance.txt";
-         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance.txt";
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance_V0"+$version+".txt";
      }
      if($mode == 3)
      {
-         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission.txt";
-         
+       //$filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission.txt";
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission_V0"+$version+".txt";
      }
      string $strFileContent = "";
      string $hdFileArray[];
@@ -77,7 +94,7 @@ proc string seAttrRecordRead(int $mode)
          return "no file path found";
      }
 }
-seAttrRecordRead(2);
+//seAngleRecordRead(2);
 
 proc seRamp(string $rampName)//initialize a new ramp
 {
@@ -93,22 +110,22 @@ proc seSetRamp(string $rampName, float $red, float $green, float $blue, float $a
     setAttr ($rampName+".colorEntryList["+$j+"].color") -type double3 $red $green $blue;
     setAttr ($rampName+".colorEntryList["+$j+"].position") $angle; 
 }
-proc seAssignAttrFromFile(int $debug, string $userNameSpace,int $mode, int $version)
+proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
 {
   int    $i                     = 0;
   int    $j                     = 0;
-  int    $loopMax               = seGetAngleSampling($mode);
+  int    $loopMax               = seGetAngleSampling($mode, $version);
   string $namespace             = $userNameSpace;
-  string $file                  = seAttrRecordRead($mode);
+  string $file                  = seAngleRecordRead($mode,$version);
   
-  string $insideReflectionRamp  = ("insideReflectionRamp" +"_v0"+$version);
-  string $outsideReflectionRamp = ("outsideReflectionRamp"+"_v0"+$version);
-  string $transmissionRamp      = ("transmissionRamp"     +"_v0"+$version);
+  string $insideReflectionRamp  = ("insideReflectionRamp" +"_v0");
+  string $outsideReflectionRamp = ("outsideReflectionRamp"+"_v0");
+  string $transmissionRamp      = ("transmissionRamp"     +"_v0");
 
          $hdFileArray           = stringToStringArray($file, "\t");
   int    $getSelectionArraySize = (size($hdFileArray)); 
-  float  $angleAmount           = 0.0;
-  float  $angle                 = 1.0/ $loopMax;//Normalize Data sample increments 
+  float  $angle                 = 1.0/$loopMax;//Normalize Data sample increments 
+  float  $angleAmount           = $angle;
   float  $red                   = 0.0;
   float  $green                 = 0.0;
   float  $blue                  = 0.0;
@@ -116,15 +133,15 @@ proc seAssignAttrFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   //Create 
   if($mode == 1)
   {
-    seRamp($insideReflectionRamp);
+    seRamp(($insideReflectionRamp+$rampVersion));
   }
   if($mode == 2)
   {
-    seRamp($outsideReflectionRamp);
+    seRamp(($outsideReflectionRamp+$rampVersion));
   }
   if($mode == 3)
   {
-    seRamp($transmissionRamp);
+    seRamp(($transmissionRamp+$rampVersion));
   }  
   //print $getSelectionArraySize;
   //switch to 1 if print out need list is required
@@ -132,8 +149,8 @@ proc seAssignAttrFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   {
       while ($i < $getSelectionArraySize)
       {
-          print  ($hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + " " + $hdFileArray[$i+3] + "\n");  
-          $i=$i+4;  
+          print  ($hdFileArray[$i+0] + " " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + "\n");  
+          $i=$i+3;  
       }
   }
   if ($debug == 0)
@@ -142,27 +159,62 @@ proc seAssignAttrFromFile(int $debug, string $userNameSpace,int $mode, int $vers
       {
           //print (" color " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + " " + $hdFileArray[$i+3] + " angle " + $angleAmount + "\n")
           //seRamp("transmissionRamp");
-          $red   = float($hdFileArray[$i+1])/255.00;
-          $green = float($hdFileArray[$i+2])/255.00;
-          $blue  = float($hdFileArray[$i+3])/255.00;
+          if($dataSturcture == 4)
+          {
+              $red   = float($hdFileArray[$i+1])/255.00;
+              $green = float($hdFileArray[$i+2])/255.00;
+              $blue  = float($hdFileArray[$i+3])/255.00;
+          }
+          if($dataSturcture == 3)
+          {
+              $red   = float($hdFileArray[$i+0])/255.00;
+              $green = float($hdFileArray[$i+1])/255.00;
+              $blue  = float($hdFileArray[$i+2])/255.00;
+          }
           if($mode == 1)
           {
-              seSetRamp($insideReflectionRamp,   $red, $green, $blue, $angleAmount, $j);
+              seSetRamp(($insideReflectionRamp+$rampVersion),   $red, $green, $blue, $angleAmount, $j);
           }
           if($mode == 2)
           {
-              seSetRamp($outsideReflectionRamp,  $red, $green, $blue, $angleAmount, $j);
+              seSetRamp(($outsideReflectionRamp+$rampVersion),  $red, $green, $blue, $angleAmount, $j);
           }
           if($mode == 3)
           {
-              seSetRamp($transmissionRamp,       $red, $green, $blue, $angleAmount, $j);
+              seSetRamp(($transmissionRamp+$rampVersion),       $red, $green, $blue, $angleAmount, $j);
           }
+          $j=$j+1;
           $angleAmount = $angleAmount + ($angle);
-          $i=$i+3;
-          print ($j+ " j \n");
-          $j=$j+1;//J is used to set the color angle value in seSetRamp
+          if($dataSturcture == 4){$i=$i+3;}
+          if($dataSturcture == 3){$i=$i+2;}          
+          print ($j+ " j "+$angleAmount+"\n");
+          //J is used to set the color angle value in seSetRamp
  
       }
     }
 }
-seAssignAttrFromFile(0, "", 2,2);
+//(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
+
+seCreateRampFromFile(0 /*debug*/,
+                     ""/*NameSpace can leave blank*/,
+                     3 /*Mode Which ramp 1 2 3*/,
+                     2 /*Ramp File Version"*/,
+                     2 /*Ramp Maya Version"*/,
+                     4 /*Ramp Data Sturcture Tuple or Quad*/
+                     );//transmission
+
+seCreateRampFromFile(0 /*debug*/,
+                     ""/*NameSpace can leave blank*/,
+                     2 /*Mode Which ramp 1 2 3*/,
+                     2 /*Ramp File Version"*/,
+                     3 /*Ramp Maya Version"*/,
+                     3 /*Ramp Data Sturcture Tuple or Quad*/
+                     );//Outside Reflection
+
+seCreateRampFromFile(0 /*debug*/,
+                     ""/*NameSpace can leave blank*/,
+                     1 /*Mode Which ramp 1 2 3*/,
+                     2 /*Ramp File Version"*/,
+                     3 /*Ramp Maya Version"*/,
+                     3 /*Ramp Data Sturcture Tuple or Quad*/
+                     );//Inside Reflection
