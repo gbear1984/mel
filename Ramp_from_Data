@@ -25,6 +25,21 @@ proc string seGetSceneName()
     
     return $fixedString;   
 }
+proc string seTrimEndString(string $t)
+{
+    int $test = `gmatch "*\n" $t`;
+    if($test == 1);
+    {
+    string $path          = $t;
+    string $scrubString   = `encodeString $t`;    
+    int    $stringSize    = `size($scrubString)`;    
+    int    $newStringSize =  $stringSize-2;
+    string $fixedString   =  endString($path, $newStringSize);
+    
+    return $fixedString;   
+    }
+    return "";
+}
 
  proc string seGetFilePath()
 { 
@@ -130,6 +145,13 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   float  $green                 = 0.0;
   float  $blue                  = 0.0;
   
+  for($t in $hdFileArray)
+  {
+     if( seTrimEndString($t) == 0)
+     {
+         print ( $t + " ");
+     }
+  }
   //Create 
   if($mode == 1)
   {
