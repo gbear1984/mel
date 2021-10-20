@@ -1,6 +1,8 @@
+//EDITED 10/20/2021
 /*Place This file in the mel command editor
 and execute it to create new color ramps*/
 
+//////////////////OS PROCS//////////////////////////////////////////////////////////////////////
 proc int seDetermineOS()
 {
     
@@ -25,21 +27,6 @@ proc string seGetSceneName()
     
     return $fixedString;   
 }
-proc string seTrimEndString(string $t)
-{
-    int $test = `gmatch "*\n" $t`;
-    if($test == 1);
-    {
-    string $path          = $t;
-    string $scrubString   = `encodeString $t`;    
-    int    $stringSize    = `size($scrubString)`;    
-    int    $newStringSize =  $stringSize-2;
-    string $fixedString   =  endString($path, $newStringSize);
-    
-    return $fixedString;   
-    }
-    return "";
-}
 
  proc string seGetFilePath()
 { 
@@ -60,13 +47,23 @@ proc string seTrimEndString(string $t)
     return $coordinatesFilePath; 
 }
 
-proc int seGetAngleSampling(int $mode, int $version)
-{    
-     string $file               = seAngleRecordRead($mode, $version);
-     $hdFileArray               = stringToStringArray($file, "\t");
-     int $getSelectionArraySize = (size($hdFileArray));
-     
-     return ($getSelectionArraySize/3); 
+
+////////////////STRING PROCS////////////////////////////////////////////////////////////////////////
+proc string seTrimEndString(string $t)
+{
+    int $test = `gmatch "*\n" $t`;
+    if($test == 1);
+    {
+    string $path          = $t;
+    string $scrubString   = `encodeString $t`;    
+    int    $stringSize    = `size($scrubString)`;    
+    int    $newStringSize =  $stringSize-2;
+    string $fixedString   =  endString($path, $newStringSize);
+    
+    return $fixedString;   
+    }
+    if($test == 0)
+    return $t;
 }
 
 proc string seAngleRecordRead(int $mode, int $version)
@@ -108,6 +105,14 @@ proc string seAngleRecordRead(int $mode, int $version)
      }
 }
 
+
+////////////////COLOR RAMP PROCS//////////////////////////////////////////////////////////////////////
+proc float seMagnitudeToColor(int $Magnitude)
+{
+    float $color = $Magnitude * 25.5;
+    return $color;
+}
+
 proc seRamp(string $rampName)//initialize a new ramp
 {
     if(objExists($rampName) == 0)
@@ -124,6 +129,18 @@ proc seSetRamp(string $rampName, float $red, float $green, float $blue, float $a
     setAttr ($rampName+".colorEntryList["+$j+"].color") -type double3 $red $green $blue;
     setAttr ($rampName+".colorEntryList["+$j+"].position") $angle; 
 }
+
+proc int seGetAngleSampling(int $mode, int $version)
+{    
+     string $file               = seAngleRecordRead($mode, $version);
+     $hdFileArray               = stringToStringArray($file, "\t");
+     int $getSelectionArraySize = (size($hdFileArray));
+     
+     return ($getSelectionArraySize/3); 
+}
+
+
+//////////////////MAIN PROC////////////////////////////////////////////////////////////////////////////////
 
 proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
 {
@@ -216,6 +233,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
     }
 }
 
+////////////////////////////PROC CALLS FOR RAMP CREATION//////////////////////////////////////////////////////////////////
 seCreateRampFromFile(0 /*debug*/,
                      ""/*NameSpace can leave blank*/,
                      3 /*Mode Which ramp 1 2 3*/,
