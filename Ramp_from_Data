@@ -49,22 +49,12 @@ proc string seGetSceneName()
 
 
 ////////////////STRING PROCS////////////////////////////////////////////////////////////////////////
-proc string seTrimEndString(string $t)
+proc int seStringToInt(string $t)//Covert String to Int
 {
-    int $test = `gmatch "*\n" $t`;
-    if($test == 1);
-    {
-    string $path          = $t;
-    string $scrubString   = `encodeString $t`;    
-    int    $stringSize    = `size($scrubString)`;    
-    int    $newStringSize =  $stringSize-2;
-    string $fixedString   =  endString($path, $newStringSize);
-    
-    return $fixedString;   
-    }
-    if($test == 0)
-    return $t;
+     int $castStringToInt = int($t);
+     return $castStringToInt;  
 }
+
 
 proc string seAngleRecordRead(int $mode, int $version)
 {
@@ -144,6 +134,7 @@ proc int seGetAngleSampling(int $mode, int $version)
 
 proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
 {
+  scriptEditorInfo -suppressWarnings true;
   int    $i                     = 0;
   int    $j                     = 0;
   int    $loopMax               = seGetAngleSampling($mode, $version);
@@ -162,13 +153,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   float  $green                 = 0.0;
   float  $blue                  = 0.0;
   
-  for($t in $hdFileArray)
-  {
-     if( seTrimEndString($t) == 0)
-     {
-         print ( $t + " ");
-     }
-  }
+
   //Create 
   if($mode == 1)
   {
@@ -186,10 +171,9 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   //switch to 1 if print out need list is required
   if ($debug == 1)
   {
-      while ($i < $getSelectionArraySize)
-      {
-          print  ($hdFileArray[$i+0] + " " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + "\n");  
-          $i=$i+3;  
+      for($t in $hdFileArray)
+      {         
+         seStringToInt($t);
       }
   }
   if ($debug == 0)
@@ -200,9 +184,9 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
           //seRamp("transmissionRamp");
           if($dataSturcture == 4)
           {
-              $red   = float($hdFileArray[$i+1])/255.00;
-              $green = float($hdFileArray[$i+2])/255.00;
-              $blue  = float($hdFileArray[$i+3])/255.00;
+              $red   = float(seStringToInt($hdFileArray[$i+1]))/255.00;
+              $green = float(seStringToInt($hdFileArray[$i+2]))/255.00;
+              $blue  = float(seStringToInt($hdFileArray[$i+3]))/255.00;
           }
           if($dataSturcture == 3)
           {
@@ -222,13 +206,13 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
           {
               seSetRamp(($transmissionRamp+$rampVersion),       $red, $green, $blue, $angleAmount, $j);
           }
+          print ($j+ " j "+$angleAmount+"\n");
           $j=$j+1;
           $angleAmount = $angleAmount + ($angle);
           if($dataSturcture == 4){$i=$i+3;}
           if($dataSturcture == 3){$i=$i+2;}          
-          print ($j+ " j "+$angleAmount+"\n");
-          //J is used to set the color angle value in seSetRamp
- 
+
+          //J is used to set the color angle value in seSetRamp 
       }
     }
 }
@@ -256,4 +240,6 @@ seCreateRampFromFile(0 /*debug*/,
                      2 /*Ramp File Version"*/,
                      3 /*Ramp Maya Version"*/,
                      4 /*Ramp Data Sturcture Tuple or Quad*/
-                     );//Inside Reflection
+                     );//Inside Reflection                   
+
+ }
