@@ -51,14 +51,6 @@ proc string seGetSceneName()
 ////////////////STRING PROCS////////////////////////////////////////////////////////////////////////
 proc int seStringToInt(string $t)//Covert String to Int
 {
-     //string $shit = `match "[0-9]+" $t`;
-     string $stripSpecials = (encodeString($t));
-     int $test = `gmatch "(\\n)" $stripSpecials`;
-     if ( $test == 1)
-     {print "FUUUUUUUUUCK";}
-     string $cleanString = `match "[0-9]+" $stripSpecials`;
-     //print ("asde "+$stripSpecials+" ");
-     //print ($cleanString+" ");
      int $castStringToInt = int($t);
      return $castStringToInt;  
 }
@@ -151,6 +143,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   string $file                   = seAngleRecordRead($mode,$version);
   string $stripSpecials          = "";//We are going to kill some special characters!
   string $stripSpecialsArray[];       //They are going to get it!
+  string $reformatString         = "";
   
   //////////////////////RAMP CREATION NAME VARIABLES///////////////////////////////////////////////////////
   string $insideReflection_CD_Ramp   = ("insideReflection_CD_Ramp" + "_v0");
@@ -194,30 +187,43 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   {
       for($t in $hdFileArray)
       { 
-       $stripSpecials = (encodeString($t));
-       $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;
-       print $removeSpecials;
-        seStringToInt($t);
+           $stripSpecials = (encodeString($t));
+           $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;   
+           for($t in $stripSpecialsArray)
+           {
+             //print ($t+" ");
+             $reformatString = ($reformatString + $t + "\t");
+             seStringToInt($t);  
+           } 
+
       }
+      print $reformatString;
+      $hdStringArray = stringToStringArray($reformatString, "\t");
   }
   if ($debug == 0)
   {
+      for($t in $hdFileArray)
+      { 
+          $stripSpecials = (encodeString($t));
+          $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;   
+          for($t in $stripSpecialsArray)
+             {
+                 //print ($t+" ");
+                 $reformatString = ($reformatString + $t + "\t"); 
+             } 
+
+       }  
       while ($j < $loopMax)
       {
           //print (" color " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + " " + $hdFileArray[$i+3] + " angle " + $angleAmount + "\n")
           //seRamp("transmissionRamp");
+          $hdStringArray = stringToStringArray($reformatString, "\t");
           if($dataSturcture == 4)
           {
-              $red   = float(seStringToInt($hdFileArray[$i+1]))/255.00;
-              $green = float(seStringToInt($hdFileArray[$i+2]))/255.00;
-              $blue  = float(seStringToInt($hdFileArray[$i+3]))/255.00;
-              $luma  = float(seStringToInt($hdFileArray[$i+4]));
-          }
-          if($dataSturcture == 3)
-          {
-              $red   = float($hdFileArray[$i+0])/255.00;
-              $green = float($hdFileArray[$i+1])/255.00;
-              $blue  = float($hdFileArray[$i+2])/255.00;
+              $red   = float(seStringToInt($hdStringArray[$i+0]))/255.00;
+              $green = float(seStringToInt($hdStringArray[$i+1]))/255.00;
+              $blue  = float(seStringToInt($hdStringArray[$i+2]))/255.00;
+              $luma  = float(seMagnitudeToColor($hdStringArray[$i+3]));
           }
           if($mode == 1)
           {
@@ -230,13 +236,12 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
           if($mode == 3)
           {
               seSetRamp(($transmission_CD_Ramp+$rampVersion),       $red, $green, $blue, $angleAmount, $j);
-              seSetRamp(($transmission_I_Ramp+$rampVersion),       $luma,$luma, $luma, $angleAmount, $j);
+              seSetRamp(($transmission_I_Ramp+$rampVersion),        $luma,$luma, $luma, $angleAmount, $j);
           }
-          print ($j+ " j "+$angleAmount+"\n");
+          //print ($j+ " j "+$angleAmount+"\n");
           $j=$j+1;
           $angleAmount = $angleAmount + ($angle);
-          if($dataSturcture == 4){$i=$i+3;}
-          if($dataSturcture == 3){$i=$i+2;}          
+          if($dataSturcture == 4){$i=$i+4;}        
 
           //J is used to set the color angle value in seSetRamp 
       }
@@ -244,10 +249,10 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
 }
 
 ////////////////////////////PROC CALLS FOR RAMP CREATION//////////////////////////////////////////////////////////////////
-seCreateRampFromFile(1 /*debug*/,
+seCreateRampFromFile(0 /*debug*/,
                      ""/*NameSpace can leave blank*/,
                      3 /*Mode Which ramp 1 2 3*/,
-                     2 /*Ramp File Version"*/,
+                     3 /*Ramp File Version"*/,
                      2 /*Ramp Maya Version"*/,
                      4 /*Ramp Data Sturcture Tuple or Quad*/
                      );//transmission
