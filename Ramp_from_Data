@@ -228,10 +228,12 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
           if($mode == 1)
           {
               seSetRamp(($insideReflection_CD_Ramp+$rampVersion),   $red, $green, $blue, $angleAmount, $j);
+              seSetRamp(($insideReflection_I_Ramp+$rampVersion),        $luma,$luma, $luma, $angleAmount, $j);
           }
           if($mode == 2)
           {
               seSetRamp(($outsideReflection_CD_Ramp+$rampVersion),  $red, $green, $blue, $angleAmount, $j);
+              seSetRamp(($outsideReflection_I_Ramp+$rampVersion),        $luma,$luma, $luma, $angleAmount, $j);
           }
           if($mode == 3)
           {
@@ -256,7 +258,22 @@ seCreateRampFromFile(0 /*debug*/,
                      2 /*Ramp Maya Version"*/,
                      4 /*Ramp Data Sturcture Tuple or Quad*/
                      );//transmission
-
+                     
+seCreateRampFromFile(0 /*debug*/,
+                     ""/*NameSpace can leave blank*/,
+                     2 /*Mode Which ramp 1 2 3*/,
+                     3 /*Ramp File Version"*/,
+                     3 /*Ramp Maya Version"*/,
+                     4 /*Ramp Data Sturcture Tuple or Quad*/
+                     );//Outside Reflection
+                     
+seCreateRampFromFile(0 /*debug*/,
+                     ""/*NameSpace can leave blank*/,
+                     1 /*Mode Which ramp 1 2 3*/,
+                     3 /*Ramp File Version"*/,
+                     3 /*Ramp Maya Version"*/,
+                     4 /*Ramp Data Sturcture Tuple or Quad*/
+                     );//Inside Reflection
 
 
  
