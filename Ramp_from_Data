@@ -51,6 +51,14 @@ proc string seGetSceneName()
 ////////////////STRING PROCS////////////////////////////////////////////////////////////////////////
 proc int seStringToInt(string $t)//Covert String to Int
 {
+     //string $shit = `match "[0-9]+" $t`;
+     string $stripSpecials = (encodeString($t));
+     int $test = `gmatch "(\\n)" $stripSpecials`;
+     if ( $test == 1)
+     {print "FUUUUUUUUUCK";}
+     string $cleanString = `match "[0-9]+" $stripSpecials`;
+     //print ("asde "+$stripSpecials+" ");
+     //print ($cleanString+" ");
      int $castStringToInt = int($t);
      return $castStringToInt;  
 }
@@ -99,8 +107,8 @@ proc string seAngleRecordRead(int $mode, int $version)
 ////////////////COLOR RAMP PROCS//////////////////////////////////////////////////////////////////////
 proc float seMagnitudeToColor(int $Magnitude)
 {
-    float $color = $Magnitude * 25.5;
-    return $color;
+    float $color = $Magnitude * 2.55;
+    return $color/255;
 }
 
 proc seRamp(string $rampName)//initialize a new ramp
@@ -138,9 +146,13 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   int    $i                      = 0;
   int    $j                      = 0;
   int    $loopMax                = seGetAngleSampling($mode, $version);
+  
   string $namespace              = $userNameSpace;
   string $file                   = seAngleRecordRead($mode,$version);
+  string $stripSpecials          = "";//We are going to kill some special characters!
+  string $stripSpecialsArray[];       //They are going to get it!
   
+  //////////////////////RAMP CREATION NAME VARIABLES///////////////////////////////////////////////////////
   string $insideReflection_CD_Ramp   = ("insideReflection_CD_Ramp" + "_v0");
   string $insideReflection_I_Ramp    = ("insideReflection_I_Ramp"  + "_v0");
   
@@ -157,6 +169,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   float  $red                    = 0.0;
   float  $green                  = 0.0;
   float  $blue                   = 0.0;
+  float  $luma                   = 0.0;
   
 
   //Create 
@@ -180,8 +193,11 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   if ($debug == 1)
   {
       for($t in $hdFileArray)
-      {         
-         seStringToInt($t);
+      { 
+       $stripSpecials = (encodeString($t));
+       $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;
+       print $removeSpecials;
+        seStringToInt($t);
       }
   }
   if ($debug == 0)
@@ -195,6 +211,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
               $red   = float(seStringToInt($hdFileArray[$i+1]))/255.00;
               $green = float(seStringToInt($hdFileArray[$i+2]))/255.00;
               $blue  = float(seStringToInt($hdFileArray[$i+3]))/255.00;
+              $luma  = float(seStringToInt($hdFileArray[$i+4]));
           }
           if($dataSturcture == 3)
           {
@@ -213,6 +230,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
           if($mode == 3)
           {
               seSetRamp(($transmission_CD_Ramp+$rampVersion),       $red, $green, $blue, $angleAmount, $j);
+              seSetRamp(($transmission_I_Ramp+$rampVersion),       $luma,$luma, $luma, $angleAmount, $j);
           }
           print ($j+ " j "+$angleAmount+"\n");
           $j=$j+1;
@@ -226,7 +244,7 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
 }
 
 ////////////////////////////PROC CALLS FOR RAMP CREATION//////////////////////////////////////////////////////////////////
-seCreateRampFromFile(0 /*debug*/,
+seCreateRampFromFile(1 /*debug*/,
                      ""/*NameSpace can leave blank*/,
                      3 /*Mode Which ramp 1 2 3*/,
                      2 /*Ramp File Version"*/,
@@ -234,20 +252,6 @@ seCreateRampFromFile(0 /*debug*/,
                      4 /*Ramp Data Sturcture Tuple or Quad*/
                      );//transmission
 
-seCreateRampFromFile(0 /*debug*/,
-                     ""/*NameSpace can leave blank*/,
-                     2 /*Mode Which ramp 1 2 3*/,
-                     2 /*Ramp File Version"*/,
-                     3 /*Ramp Maya Version"*/,
-                     4 /*Ramp Data Sturcture Tuple or Quad*/
-                     );//Outside Reflection
 
-seCreateRampFromFile(0 /*debug*/,
-                     ""/*NameSpace can leave blank*/,
-                     1 /*Mode Which ramp 1 2 3*/,
-                     2 /*Ramp File Version"*/,
-                     3 /*Ramp Maya Version"*/,
-                     4 /*Ramp Data Sturcture Tuple or Quad*/
-                     );//Inside Reflection                   
 
- }
+ 
