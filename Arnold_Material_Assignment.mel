@@ -257,6 +257,7 @@ proc seAssignAttrFromFile(int $debug, string $userNameSpace)
       }
     }
 }
+//Arnold attirbute call is confusing. mota_constant_ is not needed in the userDataField
 /*This file contains many scripts the only important ones are below this text
 
 seCreateAttrListFile();
