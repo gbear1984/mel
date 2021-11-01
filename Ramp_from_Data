@@ -1,4 +1,4 @@
-//EDITED 10/20/2021
+//EDITED 11/01/2021 V1.01
 /*Place This file in the mel command editor
 and execute it to create new color ramps*/
 
@@ -56,7 +56,7 @@ proc int seStringToInt(string $t)//Covert String to Int
 }
 
 
-proc string seAngleRecordRead(int $mode, int $version)
+proc string seAngleRecordRead(int $mode, int $version, string $filePath)
 {
      //string $filepath = seGetFilePath();
      string $filepath = "";
@@ -73,7 +73,14 @@ proc string seAngleRecordRead(int $mode, int $version)
      {
          $filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission_V0"+$version+".txt";
      }
-     
+     if($mode == 4)
+     {
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/master_V0"+$version+".txt";
+     }
+          if($mode == 5)
+     {
+         $filepath = $filePath;
+     }    
      string $strFileContent = "";
      string $hdFileArray[];
      $hdFile = `fopen $filepath "r"`;
@@ -120,27 +127,27 @@ proc seSetRamp(string $rampName, float $red, float $green, float $blue, float $a
     setAttr ($rampName+".colorEntryList["+$j+"].position") $angle; 
 }
 
-proc int seGetAngleSampling(int $mode, int $version)
+proc int seGetAngleSampling(int $mode, int $version, string $filePath)
 {    
-     string $file               = seAngleRecordRead($mode, $version);
+     string $file               = seAngleRecordRead($mode, $version, $filePath);
      $hdFileArray               = stringToStringArray($file, "\t");
-     int $getSelectionArraySize = (size($hdFileArray));
-     
+     int $getSelectionArraySize = (size($hdFileArray));     
      return ($getSelectionArraySize/3); 
 }
 
 
 //////////////////MAIN PROC////////////////////////////////////////////////////////////////////////////////
 
-proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture)//data stucture is to adjust data sturcture be 3 or 4 variables per line
-{
+proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture, string $filePath)//dataSturcture no longer needed
+{  
   scriptEditorInfo -suppressWarnings true;
   int    $i                      = 0;
   int    $j                      = 0;
-  int    $loopMax                = seGetAngleSampling($mode, $version);
+  int    $loopMax                = seGetAngleSampling($mode, $version, $filePath);
+         $loopMax                = 18;
   
   string $namespace              = $userNameSpace;
-  string $file                   = seAngleRecordRead($mode,$version);
+  string $file                   = seAngleRecordRead($mode,$version, $filePath);
   string $stripSpecials          = "";//We are going to kill some special characters!
   string $stripSpecialsArray[];       //They are going to get it!
   string $reformatString         = "";
@@ -152,9 +159,10 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   string $outsideReflection_CD_Ramp  = ("outsideReflection_CD_Ramp"+ "_v0");
   string $outsideReflection_I_Ramp   = ("outsideReflection_I_Ramp" + "_v0");
   
-  string $transmission_CD_Ramp       = ("transmission_CD_Ramp"     +"_v0");
-  string $transmission_I_Ramp        = ("transmission_I_Ramp"      +"_v0");
+  string $transmission_CD_Ramp       = ("transmission_CD_Ramp"     + "_v0");
+  string $transmission_I_Ramp        = ("transmission_I_Ramp"      + "_v0");
 
+  
          $hdFileArray            = stringToStringArray($file, "\t");
   int    $getSelectionArraySize  = (size($hdFileArray)); 
   float  $angle                  = 1.0/$loopMax;//Normalize Data sample increments 
@@ -165,22 +173,19 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   float  $luma                   = 0.0;
   
 
-  //Create 
-  if($mode == 1)
-  {
-      seRamp(($insideReflection_CD_Ramp+$rampVersion));
-      seRamp(($insideReflection_I_Ramp+$rampVersion));
-  }
-  if($mode == 2)
-  {
-      seRamp(($outsideReflection_CD_Ramp+$rampVersion));
-      seRamp(($outsideReflection_I_Ramp+$rampVersion));
-  }
-  if($mode == 3)
-  {
-      seRamp(($transmission_CD_Ramp+$rampVersion));
-      seRamp(($transmission_I_Ramp+$rampVersion));
-  }  
+  //Create ramps 
+if($debug == 0)
+{
+  seRamp(($insideReflection_CD_Ramp+$rampVersion));
+  seRamp(($insideReflection_I_Ramp+$rampVersion));
+
+  seRamp(($outsideReflection_CD_Ramp+$rampVersion));
+  seRamp(($outsideReflection_I_Ramp+$rampVersion));
+
+  seRamp(($transmission_CD_Ramp+$rampVersion));
+  seRamp(($transmission_I_Ramp+$rampVersion));
+}
+ 
   //print $getSelectionArraySize;
   //switch to 1 if print out need list is required
   if ($debug == 1)
@@ -191,7 +196,6 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
            $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;   
            for($t in $stripSpecialsArray)
            {
-             //print ($t+" ");
              $reformatString = ($reformatString + $t + "\t");
              seStringToInt($t);  
            } 
@@ -204,48 +208,50 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   {
       for($t in $hdFileArray)
       { 
-          $stripSpecials = (encodeString($t));
+          $stripSpecials = (encodeString($t));//Check for new line character and remove
           $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;   
           for($t in $stripSpecialsArray)
              {
                  //print ($t+" ");
                  $reformatString = ($reformatString + $t + "\t"); 
+                 $hdStringArray = stringToStringArray($reformatString, "\t");
              } 
 
        }  
-      while ($j < $loopMax)
-      {
-          //print (" color " + $hdFileArray[$i+1] + " " + $hdFileArray[$i+2] + " " + $hdFileArray[$i+3] + " angle " + $angleAmount + "\n")
-          //seRamp("transmissionRamp");
-          $hdStringArray = stringToStringArray($reformatString, "\t");
-          if($dataSturcture == 4)
-          {
-              $red   = float(seStringToInt($hdStringArray[$i+0]))/255.00;
-              $green = float(seStringToInt($hdStringArray[$i+1]))/255.00;
-              $blue  = float(seStringToInt($hdStringArray[$i+2]))/255.00;
-              $luma  = float(seMagnitudeToColor($hdStringArray[$i+3]));
-          }
-          if($mode == 1)
-          {
-              seSetRamp(($insideReflection_CD_Ramp+$rampVersion),   $red, $green, $blue, $angleAmount, $j);
-              seSetRamp(($insideReflection_I_Ramp+$rampVersion),        $luma,$luma, $luma, $angleAmount, $j);
-          }
-          if($mode == 2)
-          {
-              seSetRamp(($outsideReflection_CD_Ramp+$rampVersion),  $red, $green, $blue, $angleAmount, $j);
-              seSetRamp(($outsideReflection_I_Ramp+$rampVersion),        $luma,$luma, $luma, $angleAmount, $j);
-          }
-          if($mode == 3)
-          {
-              seSetRamp(($transmission_CD_Ramp+$rampVersion),       $red, $green, $blue, $angleAmount, $j);
-              seSetRamp(($transmission_I_Ramp+$rampVersion),        $luma,$luma, $luma, $angleAmount, $j);
-          }
-          //print ($j+ " j "+$angleAmount+"\n");
-          $j=$j+1;
-          $angleAmount = $angleAmount + ($angle);
-          if($dataSturcture == 4){$i=$i+4;}        
+      while ($j <= $loopMax)
+      {       
+              //Set Color Data from File Read for Transmission
+              $redT    = float(seStringToInt($hdFileArray[$i+ 1]))/255.00;
+              $greenT  = float(seStringToInt($hdFileArray[$i+ 2]))/255.00;
+              $blueT   = float(seStringToInt($hdFileArray[$i+ 3]))/255.00;
+              $lumaTY  = float(seStringToInt($hdFileArray[$i+ 4]))/255.00;
+              
+              //Set Color Data from File Read for Outside Reflection
+              $redRO   = float(seStringToInt($hdFileArray[$i+ 5]))/255.00;
+              $greenRO = float(seStringToInt($hdFileArray[$i+ 6]))/255.00;
+              $blueRO  = float(seStringToInt($hdFileArray[$i+ 7]))/255.00;
+              $lumaROY = float(seStringToInt($hdFileArray[$i+ 8]))/255.00;
+             
+              //Set Color Data from File Read for Inside Reflection
+              $redRI   = float(seStringToInt($hdFileArray[$i+ 9]))/255.00;
+              $greenRI = float(seStringToInt($hdFileArray[$i+10]))/255.00;
+              $blueRI  = float(seStringToInt($hdFileArray[$i+11]))/255.00;
+              $lumaRIY = float(seStringToInt($hdFileArray[$i+12]))/255.00;
+              
+              //Set Ramp input position
+              if(seStringToInt($hdFileArray[$i]) == 0){$angle = 0;}
+              if(seStringToInt($hdFileArray[$i]) >  0){$angle = float($j*5/90.0);if($debug == 1){print $angle;}}
 
-          //J is used to set the color angle value in seSetRamp 
+              seSetRamp(($insideReflection_CD_Ramp+$rampVersion),   $redRI, $greenRI, $blueRI,  $angle, $j);
+              seSetRamp(($outsideReflection_CD_Ramp+$rampVersion),  $redRO, $greenRO, $blueRO,  $angle, $j);
+              seSetRamp(($transmission_CD_Ramp+$rampVersion),       $redT , $greenT , $blueT,   $angle, $j);
+              seSetRamp(($transmission_I_Ramp+$rampVersion),        $lumaTY,$lumaTY,  $lumaTY,  $angle, $j);
+              seSetRamp(($outsideReflection_I_Ramp+$rampVersion),   $lumaROY,$lumaROY,$lumaROY, $angle, $j);
+              seSetRamp(($insideReflection_I_Ramp+$rampVersion),    $lumaRIY,$lumaRIY,$lumaRIY, $angle, $j);
+
+              //Increment Counts
+              $j=$j+1;
+              $i=$i+12;              
       }
     }
 }
@@ -253,27 +259,10 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
 ////////////////////////////PROC CALLS FOR RAMP CREATION//////////////////////////////////////////////////////////////////
 seCreateRampFromFile(0 /*debug*/,
                      ""/*NameSpace can leave blank*/,
-                     3 /*Mode Which ramp 1 2 3*/,
-                     3 /*Ramp File Version"*/,
-                     2 /*Ramp Maya Version"*/,
-                     4 /*Ramp Data Sturcture Tuple or Quad*/
-                     );//transmission
-                     
-seCreateRampFromFile(0 /*debug*/,
-                     ""/*NameSpace can leave blank*/,
-                     2 /*Mode Which ramp 1 2 3*/,
-                     3 /*Ramp File Version"*/,
+                     5 /*Mode Which ramp 1 2 3 4 5*/,
+                     1 /*Ramp File Version"*/,
                      3 /*Ramp Maya Version"*/,
-                     4 /*Ramp Data Sturcture Tuple or Quad*/
-                     );//Outside Reflection
-                     
-seCreateRampFromFile(0 /*debug*/,
-                     ""/*NameSpace can leave blank*/,
-                     1 /*Mode Which ramp 1 2 3*/,
-                     3 /*Ramp File Version"*/,
-                     3 /*Ramp Maya Version"*/,
-                     4 /*Ramp Data Sturcture Tuple or Quad*/
-                     );//Inside Reflection
+                     4 /*Ramp Data Sturcture Tuple or Quad*/,
+                     "C:/Users/smeis/Desktop/GuardianGlass/master_v01.txt" /*filepath if custom needed*/
+                     );//Inside Reflection       
 
-
- 
