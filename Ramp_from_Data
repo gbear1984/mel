@@ -1,4 +1,4 @@
-//EDITED 11/01/2021 V1.01
+//EDITED 11/04/2021 V1.04 added user name space to ramp names
 /*Place This file in the mel command editor
 and execute it to create new color ramps*/
 
@@ -142,6 +142,8 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
 {  
   scriptEditorInfo -suppressWarnings true;
   int    $i                      = 0;
+              $lumaROY = float(seStringToInt($hdFileArray[$i+ 8]))/255.00;
+             
   int    $j                      = 0;
   int    $loopMax                = seGetAngleSampling($mode, $version, $filePath);
          $loopMax                = 18;
@@ -176,14 +178,14 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
   //Create ramps 
 if($debug == 0)
 {
-  seRamp(($insideReflection_CD_Ramp+$rampVersion));
-  seRamp(($insideReflection_I_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$insideReflection_CD_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$insideReflection_I_Ramp+$rampVersion));
 
-  seRamp(($outsideReflection_CD_Ramp+$rampVersion));
-  seRamp(($outsideReflection_I_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$outsideReflection_CD_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$outsideReflection_I_Ramp+$rampVersion));
 
-  seRamp(($transmission_CD_Ramp+$rampVersion));
-  seRamp(($transmission_I_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$transmission_CD_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$transmission_I_Ramp+$rampVersion));
 }
  
   //print $getSelectionArraySize;
@@ -242,12 +244,12 @@ if($debug == 0)
               if(seStringToInt($hdFileArray[$i]) == 0){$angle = 0;}
               if(seStringToInt($hdFileArray[$i]) >  0){$angle = float($j*5/90.0);if($debug == 1){print $angle;}}
 
-              seSetRamp(($insideReflection_CD_Ramp+$rampVersion),   $redRI, $greenRI, $blueRI,  $angle, $j);
-              seSetRamp(($outsideReflection_CD_Ramp+$rampVersion),  $redRO, $greenRO, $blueRO,  $angle, $j);
-              seSetRamp(($transmission_CD_Ramp+$rampVersion),       $redT , $greenT , $blueT,   $angle, $j);
-              seSetRamp(($transmission_I_Ramp+$rampVersion),        $lumaTY,$lumaTY,  $lumaTY,  $angle, $j);
-              seSetRamp(($outsideReflection_I_Ramp+$rampVersion),   $lumaROY,$lumaROY,$lumaROY, $angle, $j);
-              seSetRamp(($insideReflection_I_Ramp+$rampVersion),    $lumaRIY,$lumaRIY,$lumaRIY, $angle, $j);
+              seSetRamp(($userNameSpace+$insideReflection_CD_Ramp+$rampVersion),   $redRI, $greenRI, $blueRI,  $angle, $j);
+              seSetRamp(($userNameSpace+$outsideReflection_CD_Ramp+$rampVersion),  $redRO, $greenRO, $blueRO,  $angle, $j);
+              seSetRamp(($userNameSpace+$transmission_CD_Ramp+$rampVersion),       $redT , $greenT , $blueT,   $angle, $j);
+              seSetRamp(($userNameSpace+$transmission_I_Ramp+$rampVersion),        $lumaTY,$lumaTY,  $lumaTY,  $angle, $j);
+              seSetRamp(($userNameSpace+$outsideReflection_I_Ramp+$rampVersion),   $lumaROY,$lumaROY,$lumaROY, $angle, $j);
+              seSetRamp(($userNameSpace+$insideReflection_I_Ramp+$rampVersion),    $lumaRIY,$lumaRIY,$lumaRIY, $angle, $j);
 
               //Increment Counts
               $j=$j+1;
@@ -258,11 +260,10 @@ if($debug == 0)
 
 ////////////////////////////PROC CALLS FOR RAMP CREATION//////////////////////////////////////////////////////////////////
 seCreateRampFromFile(0 /*debug*/,
-                     ""/*NameSpace can leave blank*/,
+                     "AG_43_"/*NameSpace can leave blank*/,
                      5 /*Mode Which ramp 1 2 3 4 5*/,
                      1 /*Ramp File Version"*/,
                      3 /*Ramp Maya Version"*/,
                      4 /*Ramp Data Sturcture Tuple or Quad*/,
-                     "C:/Users/smeis/Desktop/GuardianGlass/master_v01.txt" /*filepath if custom needed*/
+                     "C:/Users/smeis/Desktop/GuardianGlass/AG_43_Master_v01.txt" /*filepath if custom needed*/
                      );//Inside Reflection       
-
