@@ -1,4 +1,5 @@
-//EDITED 11/04/2021 V1.04 added user name space to ramp names
+//EDITED 11/04/2021 V1.04  added user name space to ramp names
+//EDITED 11/04/2021 V1.041 Fixed stupid script editor problem
 /*Place This file in the mel command editor
 and execute it to create new color ramps*/
 
@@ -142,8 +143,6 @@ proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $vers
 {  
   scriptEditorInfo -suppressWarnings true;
   int    $i                      = 0;
-              $lumaROY = float(seStringToInt($hdFileArray[$i+ 8]))/255.00;
-             
   int    $j                      = 0;
   int    $loopMax                = seGetAngleSampling($mode, $version, $filePath);
          $loopMax                = 18;
@@ -259,6 +258,15 @@ if($debug == 0)
 }
 
 ////////////////////////////PROC CALLS FOR RAMP CREATION//////////////////////////////////////////////////////////////////
+seCreateRampFromFile(0 /*debug*/,
+                     "SNX_62_27_"/*NameSpace can leave blank*/,
+                     5 /*Mode Which ramp 1 2 3 4 5*/,
+                     1 /*Ramp File Version"*/,
+                     3 /*Ramp Maya Version"*/,
+                     4 /*Ramp Data Sturcture Tuple or Quad*/,
+                     "C:/Users/smeis/Desktop/GuardianGlass/SNX_62_27_Master_v01.txt" /*filepath if custom needed*/
+                     );//Inside Reflection    
+                     
 seCreateRampFromFile(0 /*debug*/,
                      "AG_43_"/*NameSpace can leave blank*/,
                      5 /*Mode Which ramp 1 2 3 4 5*/,
