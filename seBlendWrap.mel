@@ -1,6 +1,6 @@
 proc string seTrimString(string $itemList, int $trimValue)
 {
-    $itemList = "pot_GEOShape";
+    //$itemList = "pot_GEOShape";
     int $StringSize = `size $itemList`-$trimValue;
     string $trimString = `substring $itemList 1  $StringSize`;
     return $trimString;
@@ -11,6 +11,7 @@ proc seAlembicCacheGrp(string $usrInputGroupName)
     string $groupName = $usrInputGroupName;  
     select -hierarchy;
     string $test[]=`ls -sl -type "mesh"`;
+    select -cl;
     if (`objExists $groupName` == 0)
         {
             group -empty -name $usrInputGroupName;
@@ -18,12 +19,15 @@ proc seAlembicCacheGrp(string $usrInputGroupName)
     for($i in $test)
     {
         string $selectionTrim=seTrimString($i,5);
-        duplicate -n ($selectionTrim+"_wrap") $selectionTrim;
-        //parent ($selectionTrim+_wrap) $groupName;
+        //print $selectionTrim;
+        //print $i;
+        //if (`objExists $groupName` == 0)
+        duplicate -rc -n ($selectionTrim+"_wrap") $selectionTrim;
+        parent ($selectionTrim+"_wrap") $groupName;
+        blendShape -w 1 ($selectionTrim+"_wrap") $i;
+        
 
      }
 }
 
-
-//seTrimString("pot_GeoShape", 5);
 seAlembicCacheGrp "cacheGrp"
