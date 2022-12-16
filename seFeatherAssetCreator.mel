@@ -1,0 +1,354 @@
+//seFeatherAssetCreator
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////STRING FORMATTING PROCS
+proc string seAddPadding(int $num,int $padding)
+{ 
+    int $lengthNum=size(string($num)) ;
+    string $padString;
+    if($lengthNum < $padding) 
+    for($i=0;$i<($padding-$lengthNum);$i++) 
+    $padString=$padString+"0" ; 
+    return $padString+string($num) ; 
+ }
+ 
+proc seBarbBuilder(string $barbName, float $x1, float $y1, float $x2, float $y2)
+{
+     string $begin = ("curve -d 1 -n "+$barbName+" ");
+     string $finalize;
+     string $point = " -p ";
+     string $space = " ";
+     string $kCount   = "";
+     string $extend   = "";
+     string $kFront   = "";
+     string $kEnd     = "";
+     string $ending = " -k 0 -k 1 ";
+     int    $degree = 1;
+     int    $i      = 0;
+     int    $j      = 0;
+
+     
+     ////////////////////////////////////////////////////////////////////////////
+     ///////////////////////////////////////////////////////////////////////////
+     //CURVE COORDINATE CONSTURCTION 
+     if($degree == 1)
+         {
+          $i = 0;
+          while($i < $j)
+          {
+               $kCount = ($kCount + "-k " + $i + " ");
+               $i++;
+          }
+         }
+
+     if($degree > 1)
+         {
+              $i = 1;
+              while($i < ($j - $degree))
+              {
+                   $kCount = ($kCount + "-k " + $i + " ");
+                   $i++;
+              }
+         }
+      $i = 0;
+      while($i < ($degree))
+         {
+
+              $kFront = ($kFront + " -k 0 ");
+              if($j < $degree)
+              {
+                   $kEnd   = ($kEnd   + " -k 1 ");
+              }
+              if($j > $degree)
+              {
+                $kEnd   = ($kEnd   + " -k "+ ($j - $degree));
+              }
+              $i++;
+         }
+       if($j <= $degree && $j > 1)
+         {
+              $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kEnd);
+         }
+
+       if($j > $degree)
+         {
+              $finalize = ("curve -d "+ $degree +" "+ $extend + $kFront + $kCount + $kEnd);
+         }
+
+       if($degree == 1)
+         {
+              $finalize = ("curve -d "+ $degree +" "+ $extend +" " + $kCount);
+         }
+     
+     $extend = $point + $x1 + $space + $y1 + $space + 0 + $space + $point + $x2 + $space + $y2 + $space + 0 + $space;
+     $finalize = $begin + $extend + $ending;
+     eval ($finalize);
+}
+
+
+
+       
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////MATH PROCS
+proc float[] seRandomBarbVector(float $directionVectorX, float $directionVectorY, float $slope, float $randMin, float $randMax)
+{
+  float $jitterRand = `rand $randMin $randMax`;
+  float $vectorPosition[ ] = {0.0, 0.0, 0.0};
+        $vectorPosition[0] = $directionVectorX * $jitterRand;//print $jitterRand;
+        $vectorPosition[1] = ($directionVectorY *$jitterRand) * $slope;//print $jitterRand;
+  return $vectorPosition;
+}
+
+proc seTriangleEngine(float $coords[], int $subdivisions)
+{
+    
+    int   $i       = 0;
+    float $angle_A = seDistance3D($coords[ 0], $coords[ 1], $coords[ 2], $coords[ 3],$coords[ 4],$coords[ 5]);
+    float $angle_B = seDistance3D($coords[ 6], $coords[ 7], $coords[ 8], $coords[ 9],$coords[10],$coords[11]);    
+    float $angle_C = seDistance3D($coords[12], $coords[13], $coords[14], $coords[15],$coords[16],$coords[17]);
+    
+    while($i < $subdivisions)
+    {
+        
+        $i++;
+    }
+    
+        
+}
+
+proc float seDistance3D(float $x1,float $x2,float $y1,float $y2,float $z1, float $z2)
+{
+     float $x = $x2-$x1;
+     float $y = $y2-$y1;
+     float $z = $z2-$z1;
+     float $distance = sqrt(($x*$x)+($y*$y)+($z*$z));
+     return $distance;
+}// end distance
+
+proc float seDistance2D(float $x1,float $x2,float $y1,float $y2, string $name)
+{
+     float $x = $x2-$x1;
+     float $y = $y2-$y1;
+     float $distance = sqrt(($x*$x)+($y*$y));
+     return $distance;
+}// end distance
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//ATTR setting procs
+
+proc seArnoldCurveRendering(string $CurveName)
+{
+   setAttr ($CurveName+".aiRenderCurve") 1;
+   connectAttr -force aiStandardSurface2.outColor ($CurveName+".aiCurveShader"); 
+   connectAttr -f remapValue1.outValue ($CurveName+".aiCurveWidth");
+   setAttr ($CurveName+".aiMode") 1;
+   setAttr ($CurveName+".aiSampleRate") 40;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////MAIN PROCS
+
+proc int sePointOnCurveCoordinate(string $name,int $oldCount, float $featherStands, float $degree, float $minRand, float $maxRand, int $enableArnold)
+{
+    int    $featherSpans      = `getAttr ($name+".spans")`;
+    int    $count             = 0 + $oldCount;
+    string $paddedCount       = 0;
+    float  $i                 = 0.00;
+    float  $increment         =  1/(($featherStands/$featherSpans)/2);                                                                    //Calibrated to featherStands amount
+    float  $barb_Angle        = tand($degree);
+    float  $barb_Y_Intercept  = 0.00;
+    float  $barb_Y_Drop       = 0.00;
+    float  $barb_Y_Drop_Final = 0.00;
+    while( $i < $featherSpans)                                                                                                            //Calculate Barb triangle
+    {
+        float $pointArray[] =  `pointPosition ($name+".u["+$i+"]")`;
+        $barb_Y_Intercept   =  $pointArray[0] * $barb_Angle;
+        $barb_Y_Drop_Final  = ($pointArray[1]-(abs($pointArray[0]) * $barb_Angle));
+        $i                  =  $i + $increment;
+        $count++;
+        $paddedCount        = seAddPadding($count, 4);
+        string $barbName    = ("featherBarb_"+$paddedCount);
+        
+        float $jitterEdge[]=seRandomBarbVector($pointArray[0], $pointArray[1], $barb_Angle, $minRand,$maxRand );                          //jitter barb edge set min/max rand to 0 if not wanted
+        seBarbBuilder($barbName, ($pointArray[0]+$jitterEdge[0]), ($pointArray[1]+$jitterEdge[1]),0,$barb_Y_Drop_Final);                  //build curve 1 degree for now
+        rename ("|"+$barbName+"|curveShape1") ($barbName+"_shape");                                                                       //Rename shapenode
+        
+        if($enableArnold == 1){seArnoldCurveRendering($barbName+"_shape");}                                                               //Turn on arnold parameters                           
+    }
+    return $count;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//GUI CODE//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+proc seFeatherAssetCreator(int $featherStrands,float $featherAngle)//, float $minRand, float $maxRand)                                                                                                              //This will eventually become the main window
+{                                                                   
+    int   $counter            =   0    ;
+    int   $enableArnold       =   1    ;
+    float $degree             =   $featherAngle;
+    float $minRand            =   000.000;
+    float $maxRand            =   000.00;
+    //float $featherStands      = 1500.000;
+        
+    $counter = sePointOnCurveCoordinate("Primary_Feather_Curve_2",        0,  $featherStrands, $degree, $minRand, $maxRand, $enableArnold);//This run through an integer to keep the barb count without global variables.
+               sePointOnCurveCoordinate("Primary_Feather_Curve_1", $counter,  $featherStrands, $degree, $minRand, $maxRand, $enableArnold);//Not Necessary to run this round though the proc again        
+}
+
+proc seFeatherToolWindowMenu(int $width, int $height)
+{
+     menu
+         -label "Edit" ;
+     menuItem
+         -label "Reset Setting" -command CTResetcloudTools;
+     menu
+         -label "About";
+     menuItem
+         -label "Info" -command aboutStevesCloudGenWindow;
+}
+
+proc seFeatherToolsendCommands()
+{
+     if(objExists("featherBarb*")){delete  "featherBarb*";}
+     float $featherStrands            = `intSliderGrp   -q -value seFeatherStrandsFSGV`;
+     float $featherAngle            = `floatSliderGrp   -q -value seFeatherAngleFSGV`;
+     seFeatherAssetCreator($featherStrands ,$featherAngle);
+}
+
+proc seFeatherToolWindowBody(int $width, int $height)
+{
+
+    columnLayout -adjustableColumn true;
+    separator -style "in";
+    seGUI_int_row(
+        /*$label*/          "Feather Barbs Count", 
+        /*$annotation*/     "Number of barbs to spawn along the shaft", 
+        /*$sliderLable*/    "seFeatherStrandsFSGV", 
+        /*$min*/                1, 
+        /*$max*/            10000,  
+        /*$value*/             50,  
+        /*$width_1*/          100, 
+        /*$width_2*/          300,
+        /*$changeCommand*/  "seFeatherToolsendCommands"
+    );
+    seGUI_float_row(
+        /*$label*/          "Feather Barbs Angle", 
+        /*$annotation*/     "Feather Angle of barbs to spawn along the shaft", 
+        /*$sliderLable*/    "seFeatherAngleFSGV", 
+        /*$min*/                0, 
+        /*$max*/              180,  
+        /*$value*/             50,  
+        /*$width_1*/          100, 
+        /*$width_2*/          300
+    );
+    seGUI_float_row(
+        /*$label*/          "Barbs Length Jitter 1", 
+        /*$annotation*/     "Feather Angle of barbs to spawn along the shaft", 
+        /*$sliderLable*/    "seFeatherMinLengthFSGV", 
+        /*$min*/               -1, 
+        /*$max*/                1,  
+        /*$value*/              0,  
+        /*$width_1*/          100, 
+        /*$width_2*/          300
+    );
+    seGUI_float_row(
+        /*$label*/          "Barbs Length Jitter 2", 
+        /*$annotation*/     "Feather Angle of barbs to spawn along the shaft", 
+        /*$sliderLable*/    "seFeatherMinLengthFSGV", 
+        /*$min*/               -1, 
+        /*$max*/                1,  
+        /*$value*/              0,  
+        /*$width_1*/          100, 
+        /*$width_2*/          300
+    );
+    separator -style "in";
+    button
+        -label "Apply"
+        -align "center"
+        -width ($width * .5)
+        -command "seFeatherToolsendCommands";
+}
+
+global proc seFeatherWindow()
+{
+     int $width  = 400;
+     int $height = 175;
+
+     if ((`window     -ex seFeatherWindow`) == true) deleteUI      seFeatherWindow;
+     if ( `windowPref -ex seFeatherWindow`)          windowPref -r seFeatherWindow;
+	 window
+	    -title "Steve's Feather Tools 0.1a"
+	    -rtf true
+	    -s   false
+	    -mnb true
+	    -mxb false
+	    -mb  on
+	    -mbv on
+	    -ip
+	    -ret
+	    -width $width
+ 	    -height $height
+	    seFeatherWindow;
+        seFeatherToolWindowMenu($width, $height);
+        seFeatherToolWindowBody($width, $height);
+     showWindow seFeatherWindow;
+}//global proc
+
+//Slider group procedurals
+proc seGUI_float_row(string $label, string $annotation, string $sliderLable, float $min, float $max, float $value, int $width_1, int $width_2)
+{
+   rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 $width_1
+            -columnWidth  2 $width_2
+            -columnAlign  1 center
+            -columnAlign  2 center
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;                      
+            text
+                -label $label
+                -annotation $annotation;
+            floatSliderGrp  -field true
+                -minValue $min
+                -maxValue $max
+                -fieldMinValue $min
+                -fieldMaxValue $max
+                -value $value
+                -en 1 
+                $sliderLable;
+            setParent..;
+}
+
+proc seGUI_int_row(string $label, string $annotation, string $sliderLable, float $min, float $max, float $value, int $width_1, int $width_2, string $changeCommand)
+{
+   rowLayout
+            -numberOfColumns 2
+            -columnWidth  1 $width_1
+            -columnWidth  2 $width_2
+            -columnAlign  1 center
+            -columnAlign  2 center
+            -columnAttach 1 both 0
+            -columnAttach 2 both 0;                      
+            text
+                -label $label
+                -annotation $annotation;
+            intSliderGrp  -field true
+                -minValue $min
+                -maxValue $max
+                -fieldMinValue $min
+                -fieldMaxValue $max
+                -value $value
+                -en 1
+                -cc $changeCommand 
+                $sliderLable;
+            setParent..;
+}
+global proc seFeatherTool()
+{
+    print "steve-eisenmann.com\n";    
+    seFeatherWindow;
+}
+seFeatherTool;https://www.youtube.com/watch?v=6mAF5dWZXcI
