@@ -1,0 +1,8 @@
+proc string seTrimString(string $itemList, int $trimValue)
+{
+    $itemList = "pot_GEOShape";
+    int $StringSize = `size $itemList`-$trimValue;
+    string $trimString = `substring $itemList 1  $StringSize`;
+    return $trimString;
+}
+seTrimString("pot_GeoShape", 5);
