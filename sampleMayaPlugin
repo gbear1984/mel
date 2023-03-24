@@ -1,0 +1,105 @@
+#include <maya/MPxCommand.h>
+#include <maya/MGlobal.h>
+#include <maya/MFnPlugin.h>
+#include <maya/MIOStream.h>
+#include <maya/MArgList.h>
+#include <maya/MObject.h>
+#include <maya/MFnDependencyNode.h>
+#include <maya/MTypeId.h>
+#include <maya/MDataBlock.h>
+#include <maya/MDataHandle.h>
+#include <maya/MFnNumericAttribute.h>
+#include <maya/MFnTypedAttribute.h>
+#include <maya/MFloatPoint.h>
+#include <maya/MFloatVector.h>
+#include <maya/MFloatMatrix.h>
+#include <maya/MPoint.h>
+#include <maya/MDagPath.h>
+#include <maya/MItDag.h>
+#include <maya/MFnMesh.h>
+
+class SphereCommand : public MPxCommand
+{
+public:
+    SphereCommand() {};
+    virtual ~SphereCommand() {};
+
+    virtual MStatus doIt(const MArgList& argList);
+    static void* creator();
+};
+
+void* SphereCommand::creator()
+{
+    return new SphereCommand();
+}
+
+MStatus SphereCommand::doIt(const MArgList& argList)
+{
+    MStatus status;
+    MFnMesh meshFn;
+
+    // Create a new mesh object
+    MObject newMesh = meshFn.create(0, 0, MFloatPoint(0, 0, 0), MFloatVector::one, &status);
+
+    // Add the vertices
+    const float radius = 1.0f;
+    const int numTheta = 10;
+    const int numPhi = 10;
+    const float thetaStep = M_PI / numTheta;
+    const float phiStep = 2.0f * M_PI / numPhi;
+
+    for (int i = 0; i < numTheta; i++)
+    {
+        float theta = i * thetaStep;
+        float sinTheta = sin(theta);
+        float cosTheta = cos(theta);
+
+        for (int j = 0; j < numPhi; j++)
+        {
+            float phi = j * phiStep;
+            float sinPhi = sin(phi);
+            float cosPhi = cos(phi);
+
+            MPoint vertex(radius * sinTheta * cosPhi,
+                          radius * sinTheta * sinPhi,
+                          radius * cosTheta);
+
+            meshFn.setPoint(meshFn.numVertices(), vertex);
+        }
+    }
+
+    // Add the faces
+    for (int i = 0; i < numTheta - 1; i++)
+    {
+        for (int j = 0; j < numPhi; j++)
+        {
+            int i00 = i * numPhi + j;
+            int i01 = i * numPhi + ((j + 1) % numPhi);
+            int i10 = (i + 1) * numPhi + j;
+            int i11 = (i + 1) * numPhi + ((j + 1) % numPhi);
+
+            meshFn.addPolygon(MIntArray() << i00 << i10 << i11 << i01);
+        }
+    }
+
+    // Set the output
+    MGlobal::selectByName(meshFn.name(), MGlobal::kReplaceList);
+
+    return MS::kSuccess;
+}
+
+MStatus initializePlugin(MObject obj)
+{
+    MStatus status;
+    MFnPlugin plugin(obj, "Your Name", "1.0", "Any");
+
+    status = plugin.registerCommand("sphere", SphereCommand::creator);
+    if (!status)
+    {
+        status.perror("registerCommand");
+        return status;
+    }
+
+    return status;
+}
+
