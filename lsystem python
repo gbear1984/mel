@@ -1,0 +1,52 @@
+import maya.cmds as cmds
+
+def l_system(axiom, rules, iterations):
+    """
+    Generates an L-system string based on the given axiom, rules, and number of iterations.
+    """
+    current_string = axiom
+    for i in range(iterations):
+        new_string = ""
+        for char in current_string:
+            if char in rules:
+                new_string += rules[char]
+            else:
+                new_string += char
+        current_string = new_string
+    return current_string
+
+def create_cube(position):
+    """
+    Creates a cube at the given position.
+    """
+    cube = cmds.polyCube()[0]
+    cmds.move(position[0], position[1], position[2], cube)
+    return cube
+
+def l_system_cubes(axiom, rules, iterations, start_position):
+    """
+    Generates cubes based on an L-system using the given axiom, rules, number of iterations, and start position.
+    """
+    l_system_string = l_system(axiom, rules, iterations)
+    current_position = start_position
+    for char in l_system_string:
+        if char == "F":
+            create_cube(current_position)
+            current_position[1] += 1
+        elif char == "+":
+            current_position[0] += 1
+        elif char == "-":
+            current_position[0] -= 1
+        elif char == "[":
+            current_position_stack.append(list(current_position))
+        elif char == "]":
+            current_position = current_position_stack.pop()
+
+# Example usage
+axiom = "F"
+rules = {"F": "FF+[+F-F-F]-[-F+F+F]"}
+iterations = 4
+start_position = [0, 0, 0]
+current_position_stack = []
+
+l_system_cubes(axiom, rules, iterations, start_position)
