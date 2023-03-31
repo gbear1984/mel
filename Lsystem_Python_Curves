@@ -1,0 +1,67 @@
+import maya.cmds as cmds
+import math
+
+def l_system(axiom, rules, iterations):
+    sentence = axiom
+    for i in range(iterations):
+        next_sentence = ''
+        for char in sentence:
+            if char in rules:
+                next_sentence += rules[char]
+            else:
+                next_sentence += char
+        sentence = next_sentence
+    return sentence
+
+def create_curve(sentence, length, angle):
+    points = [(0, 0, 0)]
+    direction = [0, 1, 0]
+    stack = []
+    for char in sentence:
+        if char == 'F':
+            x, y, z = points[-1]
+            x += length * direction[0]
+            y += length * direction[1]
+            z += length * direction[2]
+            points.append((x, y, z))
+        elif char == '+':
+            angle_rad = math.radians(angle)
+            cos_angle = math.cos(angle_rad)
+            sin_angle = math.sin(angle_rad)
+            x, y = direction[0], direction[1]
+            direction[0] = cos_angle * x - sin_angle * y
+            direction[1] = sin_angle * x + cos_angle * y
+        elif char == '-':
+            angle_rad = math.radians(-angle)
+            cos_angle = math.cos(angle_rad)
+            sin_angle = math.sin(angle_rad)
+            x, y = direction[0], direction[1]
+            direction[0] = cos_angle * x - sin_angle * y
+            direction[1] = sin_angle * x + cos_angle * y
+        elif char == '[':
+            stack.append((points[-1], direction))
+        elif char == ']':
+            points.append(stack[-1][0])
+            direction = stack[-1][1]
+            stack.pop()
+    curve = cmds.curve(p=points)
+    return curve
+
+# Set up the L-system rules
+axiom = 'X'
+rules = {
+    'X': 'F-[[X]+X]+F[+FX]-X',
+    'F': 'FF'
+}
+
+# Generate the L-system sentence
+sentence = l_system(axiom, rules, 4)
+
+# Create the curves
+curves = []
+for i in range(3):
+    curve = create_curve(sentence, 2**i, 25)
+    curves.append(curve)
+
+# Group the curves
+cmds.group(curves, name='L_System_Curves')
