@@ -1,0 +1,321 @@
+////////////////STRING PROCS////////////////////////////////////////////////////////////////////////
+
+global proc int seStringToInt(string $t)//Covert String to Int
+{
+     int $castStringToInt = int($t);
+     return $castStringToInt;  
+}
+
+
+global proc seFillNotesField(string $nodeName, string $data, string $userNameSpace)
+{
+    //Adds creation data to notes field of created ramp
+    string $appendedData = ($userNameSpace+" ramp Data \n" +$data);
+    print `attributeQuery -exists -n $nodeName "notes"`;
+    if(`attributeQuery -exists -n $nodeName "notes"` == 0)
+      {
+         addAttr -dt "string" -ln "notes" -sn "nts" $nodeName;
+       }
+     if(`attributeQuery -exists -n $nodeName "notes"` == 1)
+      {
+         setAttr  -type "string" ($nodeName+".notes") $appendedData;
+         
+         //print ($nodeName+"\n");
+       }      
+}
+
+
+global proc string seAngleRecordRead(int $mode, int $version, string $filePath)
+{
+     //string $filepath = seGetFilePath();
+     string $filepath = "";
+     if($mode == 1)
+     {
+          $filepath = "C:/Users/smeis/Desktop/GuardianGlass/indoorReflectance_V0"+$version+".txt";        
+     }
+     if($mode == 2)
+     {
+
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/outdoorReflectance_V0"+$version+".txt";
+     }
+     if($mode == 3)
+     {
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/transmission_V0"+$version+".txt";
+     }
+     if($mode == 4)
+     {
+         $filepath = "C:/Users/smeis/Desktop/GuardianGlass/master_V0"+$version+".txt";
+     }
+          if($mode == 5)
+     {
+         $filepath = $filePath;
+     }    
+     string $strFileContent = "";
+     string $hdFileArray[];
+     $hdFile = `fopen $filepath "r"`;
+     if(`filetest -w $filepath` == 1)
+     {
+         while(!feof($hdFile))//magic
+         {
+ 	           $strFileContent += `fgetline $hdFile`;
+         }         
+         fclose $hdFile;
+     }
+     if(`filetest -w $filepath` == 1)
+     { 
+         return $strFileContent;
+     }     
+     if(`filetest -w $filepath` == 0)
+     { 
+         return "no file path found";
+     }
+}
+//Import Generic Glass Material Rename //seRenameMaterial("SNR_50_Clear_");
+ //THIS PROC IS HARD CODED AND NEEDS TO BE REFINED
+global proc seRenameMaterial(string $newNameSpace,int $import)
+{
+    if($import > 0)
+    {
+        file -import -type "mayaAscii"  -ignoreVersion -ra true -mergeNamespacesOnClash true -namespace ":" -options "v=0;p=17;f=0"  -pr  -importTimeRange "combine" "/jobs/ads/guardian_glass_phase_2_J604324/build/ppHighRise/m_ppHighRise/renderData/shaders/StandinGlassMaterial.ma";
+    }
+    string $shader_hardCodedNames = "SNX_62_27_outsideReflection_CD_Ramp_v03_2D SNX_62_27_outsideReflection_CD_Ramp_v03 SNX_62_27_outsideReflection_I_Ramp_v03_2D SNX_62_27_outsideReflection_I_Ramp_v03 SNX_62_27_transmission_I_Ramp_v03_Range SNX_62_27_outsideReflection_CD_Ramp_v03_CC SNX_62_27_transmission_I_Ramp_v03_CC SNX_62_27_transmission_CD_Ramp_v03 SNX_62_27_transmission_I_Ramp_v03 SNX_62_27_FacingRatio SNX_62_27_transmission_I_Ramp_v03_2D SNX_62_27_transmission_CD_Ramp_v03_2D SNX_62_27_transmission_CD_Ramp_v03_CC SNX_62_27_outsideReflection_I_Ramp_v03_Range SNX_62_27_Glass_Material_Outside_Trans SNX_62_27_IOR_TRANSMISSION SNX_62_27_Glass_Material_Outside_Spec SNX_62_27_Glass_Material_Inside_Trans SNX_62_27_insideReflection_CD_Ramp_v03_2D SNX_62_27_insideReflection_CD_Ramp_v03 SNX_62_27_insideReflection_CD_Ramp_v03_CC SNX_62_27_Glass_Material_Inside_Spec SNX_62_27_Glass_Material_Back SNX_62_27_Glass_Material_Front SNX_62_27_insideReflection_I_Ramp_v03 SNX_62_27_insideReflection_I_Ramp_v03_CC1 SNX_62_27_insideReflection_I_Ramp_v03_2D SNX_62_27_GLASS_MTL SNX_62_27_GLASS_SG";
+    string $nameTransfer          = "";
+    string $nameTransfer2         = "";
+    $hardCodeArray                = stringToStringArray($shader_hardCodedNames, " "); 
+    int $arraySize                = `size($hardCodeArray)`;
+    int $i                        = 0;
+
+    while ($i < $arraySize)
+    {
+        //print ($hardCodeArray[$i]+"\n");
+    
+        //print (stringRemovePrefix($hardCodeArray[$i],"SNX_62_27_")+"\n");
+        $nameTransfer   = stringRemovePrefix($hardCodeArray[$i],"SNX_62_27_");
+        $nameTransfer2  = ($newNameSpace+$nameTransfer);
+        rename $hardCodeArray[$i] $nameTransfer2;
+        $i++;
+     }
+}
+
+//seRenameMaterial("SNR_50_Clear_");
+
+////////////////COLOR RAMP PROCS//////////////////////////////////////////////////////////////////////
+global proc float seMagnitudeToColor(int $Magnitude)
+{
+    float $color = $Magnitude * 2.55;
+    return $color/255;
+}
+
+global proc seRamp(string $rampName)//initialize a new ramp
+{
+    if(objExists($rampName) == 0)
+    { 
+        shadingNode -asTexture ramp -name $rampName;
+        shadingNode -asUtility place2dTexture -name ($rampName+"_2D");
+        connectAttr ($rampName+"_2D.outUV") ($rampName+".uv");
+        connectAttr ($rampName+"_2D.outUvFilterSize") ($rampName+".uvFilterSize");
+    }
+}
+
+global proc seSetRamp(string $rampName, float $red, float $green, float $blue, float $angle, int $j)
+{
+    setAttr ($rampName+".colorEntryList["+$j+"].color") -type double3 $red $green $blue;
+    setAttr ($rampName+".colorEntryList["+$j+"].position") $angle; 
+}
+
+global proc int seGetAngleSampling(int $mode, int $version, string $filePath)
+{    
+     string $file               = seAngleRecordRead($mode, $version, $filePath);
+     $hdFileArray               = stringToStringArray($file, "\t");
+     int $getSelectionArraySize = (size($hdFileArray));     
+     return ($getSelectionArraySize/3); 
+}
+
+
+//////////////////MAIN PROC////////////////////////////////////////////////////////////////////////////////
+
+global proc seCreateRampFromFile(int $debug, string $userNameSpace,int $mode, int $version, int $rampVersion ,int $dataSturcture, string $filePath)//dataSturcture no longer needed
+{  
+  scriptEditorInfo -suppressWarnings true;
+  int    $i                      = 0;
+  int    $j                      = 0;
+  int    $loopMax                = seGetAngleSampling($mode, $version, $filePath);
+         $loopMax                = 18;
+  
+  string $namespace              = $userNameSpace;
+  string $file                   = seAngleRecordRead($mode,$version, $filePath);
+  string $stripSpecials          = "";//We are going to kill some special characters!
+  string $stripSpecialsArray[];       //They are going to get it!
+  string $reformatString         = "";
+  
+  //////////////////////RAMP CREATION NAME VARIABLES///////////////////////////////////////////////////////
+  string $insideReflection_CD_Ramp    = ("insideReflection_CD_Ramp" + "_v0");
+  string $insideReflection_I_Ramp     = ("insideReflection_I_Ramp"  + "_v0");
+  
+  string $outsideReflection_CD_Ramp   = ("outsideReflection_CD_Ramp"+ "_v0");
+  string $outsideReflection_I_Ramp    = ("outsideReflection_I_Ramp" + "_v0");
+  
+  string $transmission_CD_Ramp        = ("transmission_CD_Ramp"     + "_v0");
+  string $transmission_I_Ramp         = ("transmission_I_Ramp"      + "_v0");
+
+  string $outsideReflection_CD_RECORD = "";
+  string $outsideReflection_I_RECORD  = "";
+  
+  string $insideReflection_CD_RECORD  = "";
+  string $insideReflection_I_RECORD   = "";
+  
+  string $transmission_CD_RECORD      = "";
+  string $transmission_I_RECORD       = "";
+  
+         $hdFileArray            = stringToStringArray($file, "\t");
+  int    $getSelectionArraySize  = (size($hdFileArray)); 
+  float  $angle                  = 1.0/$loopMax;//Normalize Data sample increments 
+  float  $angleAmount            = $angle;
+  float  $red                    = 0.0;
+  float  $green                  = 0.0;
+  float  $blue                   = 0.0;
+  float  $luma                   = 0.0;
+  
+
+  //Create ramps 
+if($debug == 0)
+{
+  seRamp(($userNameSpace+$insideReflection_CD_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$insideReflection_I_Ramp+$rampVersion));
+
+  seRamp(($userNameSpace+$outsideReflection_CD_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$outsideReflection_I_Ramp+$rampVersion));
+
+  seRamp(($userNameSpace+$transmission_CD_Ramp+$rampVersion));
+  seRamp(($userNameSpace+$transmission_I_Ramp+$rampVersion));
+}
+ 
+  //print $getSelectionArraySize;
+  //switch to 1 if print out need list is required
+  if ($debug == 1)
+  {
+      for($t in $hdFileArray)
+      { 
+           $stripSpecials = (encodeString($t));
+           $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;   
+           for($t in $stripSpecialsArray)
+           {
+             $reformatString = ($reformatString + $t + "\t");
+             seStringToInt($t);  
+           } 
+
+      }
+      print $reformatString;
+      $hdStringArray = stringToStringArray($reformatString, "\t");
+  }
+  if ($debug == 0)
+  {
+      for($t in $hdFileArray)
+      { 
+          $stripSpecials = (encodeString($t));//Check for new line character and remove
+          $removeSpecials = `tokenize $stripSpecials "\\n" $stripSpecialsArray`;   
+          for($t in $stripSpecialsArray)
+             {
+                 //print ($t+" ");
+                 $reformatString = ($reformatString + $t + "\t"); 
+                 $hdStringArray = stringToStringArray($reformatString, "\t");
+             } 
+
+       }  
+      while ($j <= $loopMax)
+      {
+              
+              //Set Color Data from File Read for Transmission
+              $redT    = float(seStringToInt($hdFileArray[$i+ 1]))/255.00;
+              $greenT  = float(seStringToInt($hdFileArray[$i+ 2]))/255.00;
+              $blueT   = float(seStringToInt($hdFileArray[$i+ 3]))/255.00;
+              $lumaTY  = float(seStringToInt($hdFileArray[$i+ 4]))/255.00;
+              
+              //Set Color Data from File Read for Outside Reflection
+              $redRO   = float(seStringToInt($hdFileArray[$i+ 5]))/255.00;
+              $greenRO = float(seStringToInt($hdFileArray[$i+ 6]))/255.00;
+              $blueRO  = float(seStringToInt($hdFileArray[$i+ 7]))/255.00;
+              $lumaROY = float(seStringToInt($hdFileArray[$i+ 8]))/255.00;
+             
+              //Set Color Data from File Read for Inside Reflection
+              $redRI   = float(seStringToInt($hdFileArray[$i+ 9]))/255.00;
+              $greenRI = float(seStringToInt($hdFileArray[$i+10]))/255.00;
+              $blueRI  = float(seStringToInt($hdFileArray[$i+11]))/255.00;
+              $lumaRIY = float(seStringToInt($hdFileArray[$i+12]))/255.00;
+              /*
+                            //Set Color Data from File Read for Transmission
+              $redT    = float(seStringToInt($hdFileArray[$i + 9]))/255.00;
+              $greenT  = float(seStringToInt($hdFileArray[$i + 10]))/255.00;
+              $blueT   = float(seStringToInt($hdFileArray[$i + 11]))/255.00;
+              $lumaTY  = float(seStringToInt($hdFileArray[$i + 12]))/255.00;
+              
+              //Set Color Data from File Read for Outside Reflection
+              $redRO   = float(seStringToInt($hdFileArray[$i + 1]))/255.00;
+              $greenRO = float(seStringToInt($hdFileArray[$i + 2]))/255.00;
+              $blueRO  = float(seStringToInt($hdFileArray[$i + 3]))/255.00;
+              $lumaROY = float(seStringToInt($hdFileArray[$i + 4]))/255.00;
+             
+              //Set Color Data from File Read for Inside Reflection
+              $redRI   = float(seStringToInt($hdFileArray[$i + 5]))/255.00;
+              $greenRI = float(seStringToInt($hdFileArray[$i + 6]))/255.00;
+              $blueRI  = float(seStringToInt($hdFileArray[$i + 7]))/255.00;
+              $lumaRIY = float(seStringToInt($hdFileArray[$i + 8]))/255.00;
+              */
+              
+              //Set Ramp input position
+              if(seStringToInt($hdFileArray[$i]) == 0){$angle = 0;}
+              if(seStringToInt($hdFileArray[$i]) >  0){$angle = float($j*5/90.0);if($debug == 1){print $angle;}}
+
+              seSetRamp(($userNameSpace+$insideReflection_CD_Ramp+$rampVersion),   $redRI, $greenRI, $blueRI,  $angle, $j);
+              seSetRamp(($userNameSpace+$outsideReflection_CD_Ramp+$rampVersion),  $redRO, $greenRO, $blueRO,  $angle, $j);
+              seSetRamp(($userNameSpace+$transmission_CD_Ramp+$rampVersion),       $redT , $greenT , $blueT,   $angle, $j);
+              seSetRamp(($userNameSpace+$transmission_I_Ramp+$rampVersion),        $lumaTY,$lumaTY,  $lumaTY,  $angle, $j);
+              seSetRamp(($userNameSpace+$outsideReflection_I_Ramp+$rampVersion),   $lumaROY,$lumaROY,$lumaROY, $angle, $j);
+              seSetRamp(($userNameSpace+$insideReflection_I_Ramp+$rampVersion),    $lumaRIY,$lumaRIY,$lumaRIY, $angle, $j);
+              
+              //Record Data to ramp notes 
+              $outsideReflection_CD_RECORD = $outsideReflection_CD_RECORD +"R "     + $redRI  + "\tG " +$greenRI+"\tB "+$blueRI+"\tAngle "+$angle+"\n";
+              $outsideReflection_I_RECORD  = $outsideReflection_I_RECORD  +"Luma "  + $lumaROY+ "\tAngle " +$angle  +                             "\n";
+  
+              $insideReflection_CD_RECORD  = $insideReflection_CD_RECORD  +"R "     + $redRO  + "\tG " +$greenRO+"\tB "+$blueRO+"\tAngle "+$angle +"\n";
+              $insideReflection_I_RECORD   = $insideReflection_I_RECORD   +"Luma "  + $lumaRIY+ "\tAngle " +$angle  +                             "\n";
+  
+              $transmission_CD_RECORD      = $transmission_CD_RECORD      +"R "     + $redT   + "\tG " +$greenT +"\tB "+$blueT+ "\tAngle "+$angle +"\n";
+              $transmission_I_RECORD       = $transmission_I_RECORD       +"Luma "  + $lumaTY + "\tAngle " +$angle  +                             "\n";
+              
+
+              //Increment Counts
+              $j=$j+1;
+              $i=$i+12;              
+      }
+      seFillNotesField(($userNameSpace+$outsideReflection_CD_Ramp+$rampVersion),$outsideReflection_CD_RECORD, ($userNameSpace+$outsideReflection_CD_Ramp+$rampVersion));
+      seFillNotesField(($userNameSpace+$outsideReflection_I_Ramp+$rampVersion),$outsideReflection_I_RECORD, ($userNameSpace+$outsideReflection_I_Ramp+$rampVersion));
+      
+      seFillNotesField(($userNameSpace+$insideReflection_CD_Ramp+$rampVersion),$insideReflection_CD_RECORD, ($userNameSpace+$insideReflection_CD_Ramp+$rampVersion));
+      seFillNotesField(($userNameSpace+$insideReflection_I_Ramp+$rampVersion),$insideReflection_I_RECORD, ($userNameSpace+$insideReflection_I_Ramp+$rampVersion));
+      
+      seFillNotesField(($userNameSpace+$transmission_CD_Ramp+$rampVersion),$transmission_CD_RECORD, ($userNameSpace+$transmission_CD_Ramp+$rampVersion));
+      seFillNotesField(($userNameSpace+$transmission_I_Ramp+$rampVersion),$transmission_I_RECORD, ($userNameSpace+$transmission_I_Ramp+$rampVersion));
+    }
+}
+
+global proc seCreateRampBasic(string $name, string $path)
+{
+ //This proc only asks for two arguments name which is the base for all created ramps to be made from
+ //and path. The location to pull data from. It is expecting 2 strings
+ seRenameMaterial($name, 0);  
+ seCreateRampFromFile(0 /*debug*/,
+                     $name,
+                     5 /*LEGACY Mode Which ramp 1 2 3 4 5*/,
+                     1 /*LEGACY Ramp File Version"*/,
+                     3 /*LEGACY Ramp Maya Version"*/,
+                     4 /*LEGACY Ramp Data Sturcture Tuple or Quad*/,
+                     $path /*filepath if custom needed*/
+                     );
+ 
+                     /* rename "default_render_layer_RL" $name;*/
+}
+
+//seCreateRampBasic( "SNX5XX_BAbs_CrNV78XMXM01V7", "/jobs/ads/guardian_glass_phase_2_J604324/shared/data/colorData/SNX5XX_BAbs_CrNV78XMXM01V7.1.txt");
+
+seCreateRampBasic( "HD_Colors_Bronze_Clear_SG_HighDurable_Colors_IN", "/jobs/ads/guardian_glass_phase_2_J604324/shared/clientdata/orig/scratch/HD_Colors_Bronze_Clear_SG_HighDurable_Colors_IN");
