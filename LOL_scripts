@@ -1,0 +1,173 @@
+loadPlugin "C:/Program Files/Autodesk/Maya2023/bin/plug-ins/animImportExport.mll";
+
+
+proc string seTrimString(int $trimSize,string $originalString)
+{
+    //use this to cut the tail off a string like .fbx set trimSize to 4
+    //string $originalString = "icth8qmwihydb70ea_fw45_chassis.anim";
+    int $length = `size $originalString`;
+    string $trimmedString = `substring $originalString 1 ($length - $trimSize)`;
+    return $trimmedString;
+}    
+
+proc seLoadAnimation(string $filePath, string $fileName, string $objectSelection)
+{
+    //$nameSpace = "icth8qmwihydb70ea_fw45_chassis";
+    //$filePath = "/jobs/michelobUltraLapOfLegends_3100726/docs/2023-12-11_1230_anim/icth_1m4lnydb70ea_full_recording_flipped_x_and_x"
+    //$fileName = "icth8qmwihydb70ea_fw45_chassis.anim";
+    string $nameSpace = seTrimString(5,$fileName);
+    select -r $objectSelection; 
+file -import -type "animImport"  -ignoreVersion -ra true -mergeNamespacesOnClash false -namespace $nameSpace -options ";targetTime=4;copies=1;option=replace;pictures=0;connect=0;"  -pr  -importTimeRange "combine" ($filePath+$fileName);
+}
+
+proc seLoadRace()
+{        
+    //loadPlugin "C:/Program Files/Autodesk/Maya2023/bin/plug-ins/animImportExport.mll";
+    //loadPlugin "/software/tools/ion/prod/containers/dc/93/67219da565a04bf1860e99826330d05e601b/maya/bin/plug-ins/animImportExport.so";
+    $filePath = "/jobs/michelobUltraLapOfLegends_3100726/docs/2023-12-11_1230_anim/icth_1m4lnydb70ea_full_recording_flipped_x_and_x/";
+    //FW45 Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_chassis0to10.anim", "FW45_GRP");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_chassis10to20.anim", "FW45_GRP"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_chassis20to30.anim", "FW45_GRP");
+    
+    //FW45 Tire_LF_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lf0to10.anim", "Tire_LF_GRP");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lf10to20.anim", "Tire_LF_GRP"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lf20to30.anim", "Tire_LF_GRP");
+ 
+     //FW45 Tire_LF_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lr0to10.anim", "Tire_LR_GRP");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lr10to20.anim", "Tire_LR_GRP"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lr20to30.anim", "Tire_LR_GRP");
+       
+       //FW45 Tire_RF_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf0to10.anim", "Tire_RF_GRP");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf10to20.anim", "Tire_RF_GRP"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf20to30.anim", "Tire_RF_GRP");
+    
+      //FW45 Tire_RR_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf0to10.anim", "Tire_RR_GRP");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf10to20.anim", "Tire_RR_GRP"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf20to30.anim", "Tire_RR_GRP");
+   
+   /*
+   
+    //FW22 Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw22_chassis0to10.anim", "GEO_alembic_vhcl_2000_FW22_lodA_AST");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw22_chassis10to20.anim", "GEO_alembic_vhcl_2000_FW22_lodA_AST"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw22_chassis20to30.anim", "GEO_alembic_vhcl_2000_FW22_lodA_AST");
+    
+     //FW19 Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw19_chassis0to10.anim", "GEO_alembic_vhcl_1997_FW19_lodA_AST");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw19_chassis10to20.anim", "GEO_alembic_vhcl_1997_FW19_lodA_AST"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw19_chassis20to30.anim", "GEO_alembic_vhcl_1997_FW19_lodA_AST");
+    
+     //FW18 Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw18_chassis0to10.anim", "GEO_alembic_vhcl_1996_FW18_lodA_AST");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw18_chassis10to20.anim", "GEO_alembic_vhcl_1996_FW18_lodA_AST"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw18_chassis20to30.anim", "GEO_alembic_vhcl_1996_FW18_lodA_AST");
+        
+     //FW14b Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw14_chassis0to10.anim", "GEO_alembic_vhcl_1992_FW14b_lodA_AST");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw14_chassis10to20.anim", "GEO_alembic_vhcl_1992_FW14b_lodA_AST"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw14_chassis20to30.anim", "GEO_alembic_vhcl_1992_FW14b_lodA_AST");
+    
+      //FW07 Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw07_chassis0to10.anim", "GEO_alembic_vhcl_1982_FW07C_lodA_AST");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw07_chassis10to20.anim", "GEO_alembic_vhcl_1982_FW07C_lodA_AST"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw07_chassis20to30.anim", "GEO_alembic_vhcl_1982_FW07C_lodA_AST");   
+    */                    
+    
+}
+proc seLoadRaceS4()
+{        
+    //loadPlugin "C:/Program Files/Autodesk/Maya2023/bin/plug-ins/animImportExport.mll";
+    //loadPlugin "/software/tools/ion/prod/containers/dc/93/67219da565a04bf1860e99826330d05e601b/maya/bin/plug-ins/animImportExport.so";
+    $filePath = "/jobs/michelobUltraLapOfLegends_3100726/docs/2023-12-11_1230_anim/icth_1m4lnydb70ea_full_recording_flipped_x_and_x/";
+    //FW45 Chassy Top Group
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_chassis0to10.anim", "FW45_GRP");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_chassis10to20.anim", "FW45_GRP"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_chassis20to30.anim", "FW45_GRP");
+    
+    //FW45 Tire_LF_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lf0to10.anim", "FW45_TIRE_LF");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lf10to20.anim", "FW45_TIRE_LF"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lf20to30.anim", "FW45_TIRE_LF");
+ 
+     //FW45 Tire_LF_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lr0to10.anim", "FW45_TIRE_LR");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lr10to20.anim", "FW45_TIRE_LR"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_lr20to30.anim", "FW45_TIRE_LR");
+       
+       //FW45 Tire_RF_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf0to10.anim", "FW45_TIRE_RF");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf10to20.anim", "FW45_TIRE_RF"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rf20to30.anim", "FW45_TIRE_RF");
+    
+      //FW45 Tire_RR_GRP
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rr0to10.anim", "FW45_TIRE_RR");
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rr10to20.anim", "FW45_TIRE_RR"); 
+    seLoadAnimation($filePath, "icth_1m4lnydb70ea_fw45_wheel_rr20to30.anim", "TIRE_RR");
+ }  
+  
+    
+ proc seGetSelectionTransforms() 
+{
+    string $objectSelection[] = `ls -sl`;
+    int $objectSelectionSize = `size($objectSelection)`;
+    int $i = 0;
+    while($i < $objectSelectionSize)
+    {
+        float $tXYZ[] = `getAttr($objectSelection[$i]+ ".translate")`;
+        float $rXYZ[] = `getAttr($objectSelection[$i]+ ".rotate")`;
+        float $sXYZ[] = `getAttr($objectSelection[$i]+ ".scale")`;
+        seSetLocator($objectSelection[$i], $tXYZ[0],$tXYZ[1],$tXYZ[2],$rXYZ[0],$rXYZ[1],$rXYZ[2],$sXYZ[0],$sXYZ[1],$sXYZ[2]);       
+        $i++;
+    }
+}
+
+proc seSetLocator(string $name, float $tx, float $ty, float $tz, float $rx, float $ry, float $rz, float $sx, float $sy, float $sz)
+{
+    spaceLocator -name ($name+"_loc");
+    setAttr($name+"_loc.translate") $tx $ty $tz; 
+    setAttr($name+"_loc.rotate") $rx $ry $rz;
+    setAttr($name+"_loc.scale") $sx $sy $sz;  
+}
+
+proc seFW45_Hierarchy_Structure()
+{
+    select "FW45_*_loc";
+    string $objectSelection[] = `ls -sl`;
+    int $objectSelectionSize = `size($objectSelection)`;
+    int $i = 0;
+    while($i < $objectSelectionSize)      
+    {
+        if($objectSelection[$i] != "FW45_CHASSIS_loc")
+        {
+            print $objectSelection[$i];
+            parent $objectSelection[$i] "FW45_CHASSIS_loc";
+           
+        }
+     $i++;
+    }
+    
+}
+proc seSelectionFilter() {
+    string $allObjects[] = `ls -transforms "FW45_*"`;
+    int $allObjectsSize = `size($allObjects)`;
+    string $selectedObjects[];
+    int $i = 0;
+    int $j = 0;
+
+    // Loop through the objects and filter
+    while($i < $allObjectsSize) {
+        // Check if the object does not end with "_loc"
+        if (`gmatch $allObjects[$i] "*_loc"` == 0) {
+            $selectedObjects[$j] = $allObjects[$i]; 
+            $j++;
+        }
+        $i++;
+    }
+    select $selectedObjects;
+    print $selectedObjects;
+}
