@@ -118,3 +118,26 @@ proc float roundingFunction(string $inVar, int $inRDegree)
      //print ("oV = " + $outVar + " i = "+$i+" \n");
      return $outVar;
 }//End roundingFunction
+proc float seDistanceFromTime()
+{
+        int $seCurrentFrame = `currentTime -q`;
+        currentTime ($seCurrentFrame-1);
+        float $distanceX_Past =  `getAttr "cache_vhcl_2023_FW45_rig_1:C_shadowPlame_SRT_DRIVER.translateX"`;
+        float $distanceY_Past =  `getAttr "cache_vhcl_2023_FW45_rig_1:C_shadowPlame_SRT_DRIVER.translateY"`;
+        float $distanceZ_Past =  `getAttr "cache_vhcl_2023_FW45_rig_1:C_shadowPlame_SRT_DRIVER.translateZ"`;
+        currentTime $seCurrentFrame; 
+        float $distanceX_Current =  `getAttr "cache_vhcl_2023_FW45_rig_1:C_shadowPlame_SRT_DRIVER.translateX"`;
+        float $distanceY_Current =  `getAttr "cache_vhcl_2023_FW45_rig_1:C_shadowPlame_SRT_DRIVER.translateY"`;
+        float $distanceZ_Current =  `getAttr "cache_vhcl_2023_FW45_rig_1:C_shadowPlame_SRT_DRIVER.translateZ"`;
+        float $x = $distanceX_Past-$distanceX_Current;
+        float $y = $distanceY_Past-$distanceY_Current;
+        float $z = $distanceZ_Past-$distanceZ_Current;
+        //float $x = $distanceX_Current-$distanceX_Past;
+        //float $y = $distanceY_Current-$distanceY_Past;
+        //float $z = $distanceZ_Current-$distanceZ_Past;
+                
+        float $distance = sqrt(($x*$x)+($y*$y)+($z*$z));
+        print ("x "+$x+" y "+$y+" z "+$z+"\n");
+        //print ($name+$distance+"\n");
+        return $distance;               
+}
