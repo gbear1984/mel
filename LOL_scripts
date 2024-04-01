@@ -171,3 +171,129 @@ proc seSelectionFilter() {
     select $selectedObjects;
     print $selectedObjects;
 }
+proc seMotionCurveFromObject(int $frameStart, int $frameEnd, string $objectName) {
+    refresh -suspend true;
+    //Create a curve from an animated object
+    string $extend     = "";
+    string $kCount     = "";
+    string $finalize   = "";
+    string $curveName  = ($objectName + "_curve");
+    int    $total      = 0;
+    int    $degree     = 1;
+
+    for ($frame = $frameStart; $frame <= $frameEnd; $frame++) {
+        float $trans[] = `getAttr -time $frame ($objectName + ".translate")`;
+        //float $rot[] = `getAttr -time $frame ($objectName + ".rotate")`;      
+        $extend = ($extend + "-p " + $trans[0] + " " + $trans[1] + " " + $trans[2] + " ");
+        $kCount = ($kCount + "-k " + $frame + " ");      
+    }
+    //$finalize = ("curve -d "+ $degree +" "+ $extend +" " + $kCount);
+    $finalize = ("curve -d " + $degree + " " + $extend + " " + $kCount + " -n \"" + $curveName + "\"");
+    eval ($finalize);
+    refresh -suspend false;
+}
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_2023_FW45_lodA_AST");
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_2000_FW22_lodA_AST");
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_1996_FW18_lodA_AST");
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_1997_FW19_lodA_AST");
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_1993_FW15_lodA_AST");
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_1992_FW14b_lodA_AST");
+seMotionCurveFromObject(1001,36900, "GEO_alembic_vhcl_1982_FW07C_lodA_AST");
+
+
+proc seMotionFromCurve(string $objectName,string $curveName, int $frameStart) {
+    //Create keyframe positions for nurbs curve    
+    //disable viewport for speed
+    refresh -suspend true;
+        
+    //variables for deformation adjustment
+    int $numCVs = `getAttr ($curveName+".spans")`  + `getAttr ($curveName+".degree")`;
+    //string $objectName = "pCube1";
+
+    for($frame = $frameStart; $frame <= ($numCVs+$frameStart); $frame++) {
+        currentTime $frame;
+        float $position[] = `pointPosition -world ($curveName+".cv["+($frame-$frameStart)+"]")`;
+
+        // Set the position of cube1 at this frame to the position of the CV
+        setAttr ($objectName + ".translateX") $position[0];
+        setAttr ($objectName + ".translateY") $position[1];
+        setAttr ($objectName + ".translateZ") $position[2];
+        setKeyframe ($objectName+".translate");
+    }
+    //enable viewport    
+    refresh -suspend false;
+}
+//seMotionFromCurve("pCube1","GEO_alembic_vhcl_2023_FW45_lodA_AST_curve",1001)
+
+proc seCreateLocator(string $name, float $zOffset){
+    spaceLocator -p 0 0 0 -n $name;
+    scale -r 300 300 300;
+}
+
+proc seRepoMotionTool(string $name, string $animCurve){
+      seCreateLocator(($name+"_loc"), 0);
+      seCreateLocator(($name+"_loc_aim"), -1);
+      seMotionFromCurve(($name+"_loc")    ,$animCurve,1001);
+      seMotionFromCurve(($name+"_loc_aim"),$animCurve,1008);
+      select -r ($name+"_loc_aim");
+      select -add ($name+"_loc") ;
+      AimConstraint;
+      doCreateAimConstraintArgList 1 { "1","0","0","0","0","0","-1","0","1","0","0","1","0","1","vector","","0","0","0","","1" };
+      aimConstraint -mo -weight 1 -aimVector 0 0 -1 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0;
+}
+seRepoMotionTool("FW45_", "GEO_alembic_vhcl_2023_FW45_lodA_AST_curve");
+seRepoMotionTool("FW22_", "GEO_alembic_vhcl_2000_FW22_lodA_AST_curve");
+seRepoMotionTool("FW19_", "GEO_alembic_vhcl_1997_FW19_lodA_AST_curve");
+seRepoMotionTool("FW18_", "GEO_alembic_vhcl_1996_FW18_lodA_AST_curve");
+seRepoMotionTool("FW15_", "GEO_alembic_vhcl_1993_FW15_lodA_AST_curve");
+seRepoMotionTool("FW14_", "GEO_alembic_vhcl_1992_FW14b_lodA_AST_curve");
+seRepoMotionTool("FW07_", "GEO_alembic_vhcl_1982_FW07C_lodA_AST_curve");
+
+
+proc seMotionFromDistance(string $objectName, int $frameStart, int $frameEnd) {
+    //Create keyframe positions for nurbs curve    
+    //disable viewport for speed
+    refresh -suspend true;
+    float $totalDistance = 0;
+    float $wheelRotation = 0;
+    for($frame = $frameStart; $frame <= ($frameEnd); $frame++) {
+        currentTime $frame;
+        float $position = `seDistanceFromTime`;
+        $totalDistance = $totalDistance + $position;
+        setAttr ($objectName + ".translateY") $totalDistance;
+        if($totalDistance > 0.0)
+                {
+                 $wheelRotation = ($totalDistance/(3.1415*66))*360;
+                 setAttr ($objectName + ".rotateX") $wheelRotation;
+                 setKeyframe ($objectName+".rotateX");
+                                }
+        setKeyframe ($objectName+".translateY");
+    }
+    //enable viewport    totalDistance
+    refresh -suspend false;
+}
+seMotionFromDistance("locator2",1001,1283);
+
+
+
+
+proc seSwapRaceAvatarLocators()
+{
+     string $FW45 = "FW45__loc";//2023 Logan
+     string $FW22 = "FW22__loc";//2000 Jenson
+     string $FW19 = "FW19__loc";//1997 Jaq
+     string $FW18 = "FW18__loc";//1996 Damon
+     string $FW15 = "FW15__loc";//1993 Prost
+     string $FW14 = "FW14__loc";//1992 Nigel
+     string $FW07 = "FW07__loc";//1982 Mario
+     
+     //Make temp names
+     rename $FW22 ($FW22+"temp");
+     rename $FW18 ($FW18+"temp");
+     rename $FW14 ($FW22+"temp");
+     
+     //swap to Race Finish positions;                        
+     rename ($FW18+"temp") $FW22;
+     rename ($FW14+"temp") $FW18;
+     rename ($FW22+"temp") $FW14;           
+}
