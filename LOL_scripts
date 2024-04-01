@@ -297,3 +297,61 @@ proc seSwapRaceAvatarLocators()
      rename ($FW14+"temp") $FW18;
      rename ($FW22+"temp") $FW14;           
 }
+
+proc float seDistanceFromTime(string $objectToTrack)
+{
+        int $seCurrentFrame = `currentTime -q`;
+        currentTime ($seCurrentFrame-1);
+        float $distanceX_Past =  `getAttr $objectToTrack`;
+        float $distanceY_Past =  `getAttr $objectToTrack`;
+        float $distanceZ_Past =  `getAttr $objectToTrack`;
+        currentTime $seCurrentFrame; 
+        float $distanceX_Current =  `getAttr $objectToTrack`;
+        float $distanceY_Current =  `getAttr $objectToTrack`;
+        float $distanceZ_Current =  `getAttr $objectToTrack`;
+        float $x = $distanceX_Past-$distanceX_Current;
+        float $y = $distanceY_Past-$distanceY_Current;
+        float $z = $distanceZ_Past-$distanceZ_Current;
+                
+        float $distance = sqrt(($x*$x)+($y*$y)+($z*$z));
+        //print ("x "+$x+" y "+$y+" z "+$z+"\n");
+        //print ($name+$distance+"\n");
+        return $distance;               
+}
+proc seMotionFromDistance(string $objectName, int $frameStart, int $frameEnd) {
+    //Create keyframe positions for nurbs curve    
+    //disable viewport for speed
+    refresh -suspend true;
+    float $totalDistance = 0;
+    float $wheelRotation = 0;
+    for($frame = $frameStart; $frame <= ($frameEnd); $frame++) {
+        currentTime $frame;
+        float $position = `seDistanceFromTime("cache_vhcl_2000_FW22_rig_0001:C_chassis_SRT_DRIVER.rotateZ")`;
+        $totalDistance = $totalDistance + $position;
+        setAttr ($objectName + ".translateY") $totalDistance;
+        if($totalDistance > 0.0)
+                {
+                 $wheelRotation = ($totalDistance/(3.1415*66))*360;
+                 setAttr ($objectName + ".rotateX") $wheelRotation;
+                 setKeyframe ($objectName+".rotateX");
+                                }
+        setKeyframe ($objectName+".translateY");
+    }
+    //enable viewport    totalDistance
+    refresh -suspend false;
+}
+proc seViewCurve(string $objectName, int $frameStart, int $frameEnd) {
+    //Create keyframe positions for nurbs curve    
+    //disable viewport for speed
+    refresh -suspend true;
+    for($frame = $frameStart; $frame <= ($frameEnd); $frame++) {
+        currentTime $frame;
+        float $position = `getAttr ("cache_vhcl_2000_FW22_rig_0001:C_chassis_SRT_DRIVER.rotateZ")`;
+        setAttr ($objectName + ".rotateZ") $position;
+        setKeyframe ($objectName+".rotateZ");
+    }
+    //enable viewport    totalDistance
+    refresh -suspend false;
+}
+seMotionFromDistance("locator1",1400,1650);
+seViewCurve("locator1",1400,1650);
