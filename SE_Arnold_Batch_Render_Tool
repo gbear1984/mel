@@ -1,0 +1,265 @@
+import os
+import maya.cmds as cmds
+import maya.mel as mel
+import maya.OpenMayaUI as omui
+from PySide2 import QtWidgets, QtCore
+from shiboken2 import wrapInstance
+import subprocess
+
+class ArnoldRenderSettings:
+    def __init__(self):
+        self.scene_path = cmds.file(q=True, sn=True)
+        self.scene_dir = os.path.dirname(self.scene_path)
+        self.scene_name = os.path.splitext(os.path.basename(self.scene_path))[0]
+        self.render_dir = os.path.join(self.scene_dir, f"{self.scene_name}_renders")
+        if not os.path.exists(self.render_dir):
+            os.makedirs(self.render_dir)
+
+        self.start_frame = int(cmds.getAttr("defaultRenderGlobals.startFrame"))
+        self.end_frame = int(cmds.getAttr("defaultRenderGlobals.endFrame"))
+        self.resolution_x = int(cmds.getAttr("defaultResolution.width"))
+        self.resolution_y = int(cmds.getAttr("defaultResolution.height"))
+        self.aa_samples = int(cmds.getAttr("defaultArnoldRenderOptions.AASamples"))
+        self.aa_max = int(cmds.getAttr("defaultArnoldRenderOptions.AASamplesMax")) if cmds.attributeQuery("AASamplesMax", node="defaultArnoldRenderOptions", exists=True) else self.aa_samples
+        self.adaptive_threshold = float(cmds.getAttr("defaultArnoldRenderOptions.AA_adaptive_threshold"))
+        self.motion_blur = bool(cmds.getAttr("defaultArnoldRenderOptions.motion_blur_enable"))
+        self.res_multiplier = 1.0
+
+        render_cams = [cam for cam in cmds.ls(type='camera') if cmds.getAttr(cam + '.renderable')]
+        self.camera = cmds.listRelatives(render_cams[0], parent=True)[0] if render_cams else "RENDER_CAMERA_NOT_FOUND"
+
+        self.settings = {
+            "Renderer": ("-r", "arnold"),
+            "Start Frame": ("-s", str(self.start_frame)),
+            "End Frame": ("-e", str(self.end_frame)),
+            "Camera": ("-cam", self.camera),
+            "Image Output Directory": ("-rd", self.render_dir),
+            "Image Name": ("-im", self.scene_name),
+            "Image Format": ("-of", "exr"),
+            "Project Directory": ("-proj", ""),
+            "Threads": ("-rt", "0"),
+            "Verbose Level": ("-ai:lve", "2"),
+        }
+
+    def normalize_path(self, path):
+        norm = os.path.normpath(path)
+        return norm.replace('\\', '/') if os.name != 'nt' else norm.replace('/', '\\')
+
+    def get_command_args(self):
+        args = []
+        for _, (flag, value) in self.settings.items():
+            args.extend([flag, self.normalize_path(value)] if isinstance(value, str) else [flag, str(value)])
+        args.append(self.normalize_path(self.scene_path))
+        return args
+
+    def get_command_string(self):
+        parts = ['"Render"']
+        for _, (flag, value) in self.settings.items():
+            parts.append(f'{flag} "{self.normalize_path(value)}"' if isinstance(value, str) else f'{flag} {value}')
+        parts.append(f'"{self.normalize_path(self.scene_path)}"')
+        return " ".join(parts)
+
+class RenderBatchUI(QtWidgets.QDialog):
+    def __init__(self):
+        parent = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
+        super(RenderBatchUI, self).__init__(parent)
+        self.setWindowTitle("Arnold Batch Render Tool")
+        self.setMinimumWidth(400)
+
+        self.settings = ArnoldRenderSettings()
+        self.gpu_enabled = cmds.getAttr('defaultArnoldRenderOptions.renderDevice') == 1
+        self.build_ui()
+
+    def build_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+
+        self.res_label = QtWidgets.QLabel(f"Resolution: {self.settings.resolution_x} x {self.settings.resolution_y}")
+        layout.addWidget(self.res_label)
+
+        self.res_mult = QtWidgets.QDoubleSpinBox()
+        self.res_mult.setRange(0.1, 4.0)
+        self.res_mult.setSingleStep(0.1)
+        self.res_mult.setValue(1.0)
+        layout.addWidget(QtWidgets.QLabel("Resolution Multiplier:"))
+        layout.addWidget(self.res_mult)
+
+        self.aa_spin = QtWidgets.QSpinBox()
+        self.aa_spin.setRange(1, 10)
+        self.aa_spin.setValue(self.settings.aa_samples)
+        layout.addWidget(QtWidgets.QLabel("AA Samples:"))
+        layout.addWidget(self.aa_spin)
+
+        self.max_aa_spin = QtWidgets.QSpinBox()
+        self.max_aa_spin.setRange(1, 10)
+        self.max_aa_spin.setValue(self.settings.aa_max)
+        layout.addWidget(QtWidgets.QLabel("Max AA Samples (UI only):"))
+        layout.addWidget(self.max_aa_spin)
+
+        self.adaptive_threshold_field = QtWidgets.QDoubleSpinBox()
+        self.adaptive_threshold_field.setRange(0.0, 5.0)
+        self.adaptive_threshold_field.setSingleStep(0.01)
+        self.adaptive_threshold_field.setValue(self.settings.adaptive_threshold)
+        layout.addWidget(QtWidgets.QLabel("AA Adaptive Threshold:"))
+        layout.addWidget(self.adaptive_threshold_field)
+
+        self.motion_blur_toggle = QtWidgets.QCheckBox("Enable Motion Blur")
+        self.motion_blur_toggle.setChecked(self.settings.motion_blur)
+        layout.addWidget(self.motion_blur_toggle)
+
+        self.start_frame_field = QtWidgets.QSpinBox()
+        self.start_frame_field.setRange(-100000, 100000)
+        self.start_frame_field.setValue(self.settings.start_frame)
+        layout.addWidget(QtWidgets.QLabel("Start Frame:"))
+        layout.addWidget(self.start_frame_field)
+
+        self.end_frame_field = QtWidgets.QSpinBox()
+        self.end_frame_field.setRange(-100000, 100000)
+        self.end_frame_field.setValue(self.settings.end_frame)
+        layout.addWidget(QtWidgets.QLabel("End Frame:"))
+        layout.addWidget(self.end_frame_field)
+
+        self.device_toggle = QtWidgets.QCheckBox("Use GPU Rendering")
+        self.device_toggle.setChecked(self.gpu_enabled)
+        layout.addWidget(self.device_toggle)
+
+        self.override_proj_checkbox = QtWidgets.QCheckBox("Use Scene Folder as Project Directory")
+        self.override_proj_checkbox.setChecked(True)
+        layout.addWidget(self.override_proj_checkbox)
+
+        self.cmd_preview = QtWidgets.QTextEdit()
+        self.cmd_preview.setReadOnly(True)
+        self.cmd_preview.setMinimumHeight(80)
+        layout.addWidget(QtWidgets.QLabel("Render Command Preview:"))
+        layout.addWidget(self.cmd_preview)
+
+        layout.addWidget(self._button("Update Preview", self.update_preview))
+        layout.addWidget(self._button("Render", self.execute_render))
+        layout.addWidget(self._button("Write .BAT File", self.write_bat_file))
+        layout.addWidget(self._wrong_button())
+
+        self.update_preview()
+
+    def _button(self, label, callback):
+        btn = QtWidgets.QPushButton(label)
+        btn.clicked.connect(callback)
+        return btn
+
+    def _wrong_button(self):
+        btn = QtWidgets.QPushButton("W.R.O.N.G. Render")
+        btn.setToolTip(
+            "Workflow Render Override: Noncompliant Generation\n"
+            "A fallback render protocol executed manually inside Maya to bypass licensing restrictions "
+            "and watermark enforcement."
+        )
+        btn.clicked.connect(self.internal_maya_render)
+        return btn
+
+    def update_preview(self):
+        mult = self.res_mult.value()
+        self.settings.res_multiplier = mult
+
+        width = int(cmds.getAttr("defaultResolution.width") * mult)
+        height = int(cmds.getAttr("defaultResolution.height") * mult)
+        cmds.setAttr("defaultResolution.width", width)
+        cmds.setAttr("defaultResolution.height", height)
+        self.settings.resolution_x = width
+        self.settings.resolution_y = height
+
+        self.settings.aa_samples = self.aa_spin.value()
+        self.settings.aa_max = self.max_aa_spin.value()
+        self.settings.adaptive_threshold = self.adaptive_threshold_field.value()
+        self.settings.motion_blur = self.motion_blur_toggle.isChecked()
+
+        cmds.setAttr("defaultArnoldRenderOptions.AASamples", self.settings.aa_samples)
+        if cmds.attributeQuery("AASamplesMax", node="defaultArnoldRenderOptions", exists=True):
+            cmds.setAttr("defaultArnoldRenderOptions.AASamplesMax", self.settings.aa_max)
+        cmds.setAttr("defaultArnoldRenderOptions.AA_adaptive_threshold", self.settings.adaptive_threshold)
+        cmds.setAttr("defaultArnoldRenderOptions.motion_blur_enable", self.settings.motion_blur)
+
+        self.settings.start_frame = self.start_frame_field.value()
+        self.settings.end_frame = self.end_frame_field.value()
+        cmds.setAttr("defaultRenderGlobals.startFrame", self.settings.start_frame)
+        cmds.setAttr("defaultRenderGlobals.endFrame", self.settings.end_frame)
+
+        self.settings.settings["Start Frame"] = ("-s", str(self.settings.start_frame))
+        self.settings.settings["End Frame"] = ("-e", str(self.settings.end_frame))
+
+        proj_dir = self.settings.scene_dir if self.override_proj_checkbox.isChecked() else cmds.workspace(q=True, rd=True)
+        self.settings.settings["Project Directory"] = ("-proj", proj_dir)
+
+        self.res_label.setText(f"Resolution: {self.settings.resolution_x} x {self.settings.resolution_y}")
+        gpu_flag = "MTOA_RENDER_DEVICE=GPU" if self.device_toggle.isChecked() else "MTOA_RENDER_DEVICE=CPU"
+        self.cmd_preview.setText(f"{gpu_flag} {self.settings.get_command_string()}")
+
+    def execute_render(self):
+        render_path = r"C:\Program Files\Autodesk\Maya2024\bin\Render.exe"
+        proj_dir = self.settings.scene_dir if self.override_proj_checkbox.isChecked() else cmds.workspace(q=True, rd=True)
+        self.settings.settings["Project Directory"] = ("-proj", proj_dir)
+
+        os.environ['MTOA_RENDER_DEVICE'] = 'GPU' if self.device_toggle.isChecked() else 'CPU'
+        full_cmd = [render_path] + self.settings.get_command_args()
+
+        try:
+            subprocess.run(full_cmd, shell=False, check=True)
+        except subprocess.CalledProcessError as e:
+            QtWidgets.QMessageBox.critical(self, "Render Failed", f"Render failed:\n{e}")
+
+    def write_bat_file(self):
+        filepath, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save .BAT File", self.settings.scene_name + ".bat", "Batch Files (*.bat)")
+        if not filepath:
+            return
+
+        render_path = r"C:\Program Files\Autodesk\Maya2024\bin\Render.exe"
+        proj_dir = self.settings.scene_dir if self.override_proj_checkbox.isChecked() else cmds.workspace(q=True, rd=True)
+        self.settings.settings["Project Directory"] = ("-proj", proj_dir)
+
+        args = self.settings.get_command_args()
+        cmd_line = f'"{render_path}" ' + " ".join(f'"{a}"' if " " in a else a for a in args)
+        mtoa_env = "set MTOA_RENDER_DEVICE=GPU" if self.device_toggle.isChecked() else "set MTOA_RENDER_DEVICE=CPU"
+
+        try:
+            with open(filepath, "w") as f:
+                f.write("@echo off\n")
+                f.write(f"{mtoa_env}\n")
+                f.write(f"{cmd_line}\n")
+                f.write("pause\n")
+            QtWidgets.QMessageBox.information(self, "Batch File Saved", f".BAT file written to:\n{filepath}")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Write Failed", f"Could not write BAT file:\n{e}")
+
+    def internal_maya_render(self):
+        from maya import mel
+
+        proj_dir = self.settings.scene_dir if self.override_proj_checkbox.isChecked() else cmds.workspace(q=True, rd=True)
+        self.settings.settings["Project Directory"] = ("-proj", proj_dir)
+
+        start = self.start_frame_field.value()
+        end = self.end_frame_field.value()
+        cam = self.settings.camera
+        output_dir = self.settings.render_dir
+        image_name = self.settings.scene_name
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        cmds.setAttr("defaultRenderGlobals.imageFilePrefix", image_name, type="string")
+        cmds.workspace(fileRule=["images", output_dir])
+        cmds.setAttr("defaultRenderGlobals.imageFormat", 51)
+
+        for frame in range(start, end + 1):
+            cmds.currentTime(frame)
+            print(f"[W.R.O.N.G.] Rendering frame {frame} with camera {cam}")
+            mel.eval(f'arnoldRender -cam "{cam}" -f {frame};')
+
+        QtWidgets.QMessageBox.information(self, "W.R.O.N.G. Complete", "Frames rendered inside Maya without watermark.")
+
+# === LAUNCH ===
+if __name__ == "__main__":
+    try:
+        ui.close()
+        ui.deleteLater()
+    except:
+        pass
+
+    ui = RenderBatchUI()
+    ui.show()
