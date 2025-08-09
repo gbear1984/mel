@@ -1,0 +1,815 @@
+# -*- coding: utf-8 -*-
+"""
+==============================================================================
+ SE Toolset - Arnold Batch Render Tool (W.R.O.N.G.) | Version 1.41b stable
+------------------------------------------------------------------------------
+ Created to make Maya a more peaceful system through clarity, control,
+ and noncompliant override options for rendering workflows.
+
+ Author: Steve Eisenmann
+ Website: https://steve-eisenmann.com
+ GitHub: https://github.com/gbear1984
+==============================================================================
+
+ DESCRIPTION:
+ This tool allows for flexible Arnold batch rendering in Maya via GUI or
+ internal W.R.O.N.G. execution. Includes:
+  - Full resolution + AA control
+  - Motion blur and adaptive sampling toggles
+  - GPU/CPU switching
+  - Custom project override
+  - Live log + progress for internal (W.R.O.N.G.) rendering
+  - .BAT export for external automation
+  - Cancelable internal render protocol
+  - Auto-pause / auto-resume window
+
+ VERSIONING SCHEME:
+ 1.XXa - Alpha: core features prototyped
+ 1.XXb - Beta: functional integration, pending stability
+ 1.XXprod - Production ready (internal or pipeline deployable)
+
+==============================================================================
+
+ PYTHON IMPORTS (why they're here):
+ os               - Paths, dirs, env
+ subprocess       - External renders (Render.exe)
+ maya.cmds/mel    - Scene/query + calling Arnold render
+ maya.OpenMayaUI  - Parenting Qt to Maya main window
+ PySide2          - UI
+ shiboken2        - Wrap Maya Qt window
+ datetime, time   - ETA / schedules
+ json, glob       - Arnold stats logs
+ shutil           - Moving frames to versioned folders
+==============================================================================
+
+ VERSION HISTORY - W.R.O.N.G. Render Tool
+ ------------------------------------------------------------------------------
+ 1.00a - Initial prototype: basic GUI, AA override, camera support.
+ 1.05b - Added motion blur toggle, res multiplier, and project override.
+ 1.09b - .BAT export support, adaptive AA, and GPU toggle added.
+ 1.20b - Introduced per-frame ETA, render progress, pause/resume control.
+ 1.30b - Added Arnold JSON log reader, stats parser, and batch log output.
+ 1.35b - Integrated live JSON frame summary into the main UI.
+ 1.36b - UI polishing, error catching, and file path normalization fixes.
+ 1.38b - Major update: fully working auto-folder versioning system.
+         • Frames now route into v### subdirectories
+         • Auto version-up logic for new renders
+         • Specific version override toggle
+         • Bugfixes to frame movement from temp directories
+ 1.41b - Cleanups and fixes:
+         • Fixed versioned filename logic + removed dead code
+         • Unified version-folder selection (no duplication)
+         • Auto-resume reliably triggers; removed bad UI dependency
+         • Render.exe autodiscovery; no hardcoded path
+         • BAT writer uses UTF-8 + proper newlines
+         • External renders use -x/-y flags (no scene mutation)
+         • Internal renders restore original resolution
+         • Stats reader more robust + debounced
+         • Render device mirrored to Arnold attr for internal runs
+==============================================================================
+"""
+
+import os
+import re
+import glob
+import json
+import time
+import shutil
+import subprocess
+import datetime
+
+import maya.cmds as cmds
+import maya.mel as mel
+import maya.OpenMayaUI as omui
+
+from PySide2 import QtWidgets, QtCore
+from shiboken2 import wrapInstance
+
+
+# ------------------------------
+# Core settings / helpers
+# ------------------------------
+class ArnoldRenderSettings:
+    def __init__(self):
+        # Scene path (fallback for unsaved)
+        self.scene_path = cmds.file(q=True, sn=True)
+        if not self.scene_path:
+            self.scene_path = os.path.join(cmds.workspace(q=True, rd=True), "unsaved_scene.mb")
+
+        self.scene_dir = os.path.dirname(self.scene_path)
+        self.scene_name = os.path.splitext(os.path.basename(self.scene_path))[0]
+
+        # Output root (with permission fallback)
+        try:
+            self.render_dir = os.path.join(self.scene_dir, f"{self.scene_name}_renders")
+            if not os.path.exists(self.render_dir):
+                os.makedirs(self.render_dir)
+        except PermissionError:
+            fallback = os.path.join(os.environ.get("TEMP", "C:/Temp"), f"{self.scene_name}_renders")
+            self.render_dir = fallback
+            os.makedirs(self.render_dir, exist_ok=True)
+
+        # Core scene read
+        self.start_frame = int(cmds.getAttr("defaultRenderGlobals.startFrame"))
+        self.end_frame = int(cmds.getAttr("defaultRenderGlobals.endFrame"))
+        self.resolution_x = int(cmds.getAttr("defaultResolution.width"))
+        self.resolution_y = int(cmds.getAttr("defaultResolution.height"))
+        self.aa_samples = int(cmds.getAttr("defaultArnoldRenderOptions.AASamples"))
+        self.aa_max = int(cmds.getAttr("defaultArnoldRenderOptions.AASamplesMax")) if cmds.attributeQuery("AASamplesMax", node="defaultArnoldRenderOptions", exists=True) else self.aa_samples
+        self.adaptive_threshold = float(cmds.getAttr("defaultArnoldRenderOptions.AA_adaptive_threshold"))
+        self.motion_blur = bool(cmds.getAttr("defaultArnoldRenderOptions.motion_blur_enable"))
+        self.res_multiplier = 1.0  # UI-driven
+
+        # Camera
+        render_cams = [c for c in cmds.ls(type='camera') if cmds.getAttr(c + '.renderable')]
+        self.camera = cmds.listRelatives(render_cams[0], parent=True)[0] if render_cams else None
+
+        # CLI assembly dict (flags for Render.exe)
+        self.cli = {
+            "Renderer": ("-r", "arnold"),
+            "Start Frame": ("-s", str(self.start_frame)),
+            "End Frame": ("-e", str(self.end_frame)),
+            "Camera": ("-cam", self.camera or "__NO_RENDER_CAM__"),
+            "Image Output Directory": ("-rd", self.render_dir),
+            "Image Name": ("-im", self.scene_name),
+            "Image Format": ("-of", "exr"),
+            "Project Directory": ("-proj", ""),  # set later
+            "Threads": ("-rt", "0"),
+            "Verbose Level": ("-ai:lve", "2"),  # Arnold verbosity
+            "Width": ("-x", str(self.resolution_x)),
+            "Height": ("-y", str(self.resolution_y)),
+        }
+
+        # Versioning state
+        self.current_version = 0  # 0 = unversioned
+        self.version_folder = None
+
+    @staticmethod
+    def normalize_path(path):
+        norm = os.path.normpath(path)
+        return norm.replace('\\', '/') if os.name != 'nt' else norm.replace('/', '\\')
+
+    def get_command_args(self):
+        args = []
+        for _, (flag, value) in self.cli.items():
+            val = self.normalize_path(value) if isinstance(value, str) else str(value)
+            args.extend([flag, val])
+        args.append(self.normalize_path(self.scene_path))
+        return args
+
+    def get_command_string(self):
+        parts = ['"Render"']
+        for _, (flag, value) in self.cli.items():
+            if isinstance(value, str):
+                parts.append(f"{flag} \"{self.normalize_path(value)}\"")
+            else:
+                parts.append(f"{flag} {value}")
+        parts.append(f'"{self.normalize_path(self.scene_path)}"')
+        return " ".join(parts)
+
+    # -------- Version helpers ---------
+    @staticmethod
+    def _scan_existing_versions(output_dir, base_name):
+        pattern = re.compile(rf"{re.escape(base_name)}_v(\d{{3}})\.\d{{4}}\.exr", re.IGNORECASE)
+        versions = []
+        if os.path.isdir(output_dir):
+            for f in os.listdir(output_dir):
+                m = pattern.search(f)
+                if m:
+                    versions.append(int(m.group(1)))
+        return versions
+
+    def get_next_version_number(self, output_dir, base_name):
+        versions = self._scan_existing_versions(output_dir, base_name)
+        return (max(versions) + 1) if versions else 1
+
+    def build_versioned_dest(self, output_root, base_name, version, frame):
+        if version <= 0:
+            # unversioned
+            return os.path.join(output_root, f"{base_name}.{frame:04d}.exr")
+        version_dir = os.path.join(output_root, f"v{version:03d}")
+        os.makedirs(version_dir, exist_ok=True)
+        return os.path.join(version_dir, f"{base_name}_v{version:03d}.{frame:04d}.exr")
+
+
+# ------------------------------
+# UI / Controller
+# ------------------------------
+class RenderBatchUI(QtWidgets.QDialog):
+    log_timer_interval = 12000  # ms
+
+    def __init__(self):
+        parent = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
+        super(RenderBatchUI, self).__init__(parent)
+        self.setWindowTitle("W.R.O.N.G. Batch Render Tool")
+        self.setMinimumWidth(960)
+
+        self.settings = ArnoldRenderSettings()
+        self.gpu_enabled = cmds.getAttr('defaultArnoldRenderOptions.renderDevice') == 1
+        self.cancelled = False
+        self.paused = False
+        self.last_log_stamp = ""
+        self.log_pattern = None
+        self.log_timer = None
+
+        self.build_ui()
+        self.update_preview()
+        self.paused = self.launch_paused_checkbox.isChecked()
+        self._update_pause_label()
+
+    # ----------- UI BUILD -----------
+    def build_ui(self):
+        self.pause_hour = 8.0  # default pause hour
+
+        outer = QtWidgets.QVBoxLayout(self)
+        main = QtWidgets.QHBoxLayout()
+        outer.addLayout(main)
+
+        left = QtWidgets.QVBoxLayout()
+        main.addLayout(left, 3)
+
+        # Resolution label
+        self.res_label = QtWidgets.QLabel(f"Resolution: {self.settings.resolution_x} x {self.settings.resolution_y}")
+        left.addWidget(self.res_label)
+
+        # Versioning controls
+        self.version_checkbox = QtWidgets.QCheckBox("Enable File Versioning")
+        self.version_checkbox.setChecked(False)
+        self.version_checkbox.stateChanged.connect(self.toggle_version_fields)
+        left.addWidget(self.version_checkbox)
+
+        v_layout = QtWidgets.QHBoxLayout()
+        self.version_auto_radio = QtWidgets.QRadioButton("Auto Version Up")
+        self.version_specific_radio = QtWidgets.QRadioButton("Use Specific Version:")
+        self.version_auto_radio.setChecked(True)
+        v_layout.addWidget(self.version_auto_radio)
+        v_layout.addWidget(self.version_specific_radio)
+        self.version_spinbox = QtWidgets.QSpinBox()
+        self.version_spinbox.setRange(1, 999)
+        self.version_spinbox.setEnabled(False)
+        v_layout.addWidget(self.version_spinbox)
+        left.addLayout(v_layout)
+
+        # Res multiplier (affects external flags; internal will temporarily set attrs)
+        self.res_mult = QtWidgets.QDoubleSpinBox()
+        self.res_mult.setRange(0.1, 4.0)
+        self.res_mult.setSingleStep(0.1)
+        self.res_mult.setValue(1.0)
+        self.restore_resolution_btn = QtWidgets.QPushButton("Restore Original Resolution")
+        self.restore_resolution_btn.clicked.connect(self.restore_original_resolution)
+        left.addWidget(self.restore_resolution_btn)
+        left.addWidget(QtWidgets.QLabel("Resolution Multiplier:"))
+        left.addWidget(self.res_mult)
+
+        # AA / Adaptive / Motion blur
+        self.aa_spin = QtWidgets.QSpinBox(); self.aa_spin.setRange(1, 99); self.aa_spin.setValue(self.settings.aa_samples)
+        left.addWidget(QtWidgets.QLabel("AA Samples:")); left.addWidget(self.aa_spin)
+        self.max_aa_spin = QtWidgets.QSpinBox(); self.max_aa_spin.setRange(1, 99); self.max_aa_spin.setValue(self.settings.aa_max)
+        left.addWidget(QtWidgets.QLabel("Max AA Samples (UI only):")); left.addWidget(self.max_aa_spin)
+        self.adaptive_threshold_field = QtWidgets.QDoubleSpinBox(); self.adaptive_threshold_field.setDecimals(3); self.adaptive_threshold_field.setRange(0.0, 5.0); self.adaptive_threshold_field.setSingleStep(0.001); self.adaptive_threshold_field.setValue(self.settings.adaptive_threshold)
+        left.addWidget(QtWidgets.QLabel("AA Adaptive Threshold:")); left.addWidget(self.adaptive_threshold_field)
+        self.motion_blur_toggle = QtWidgets.QCheckBox("Enable Motion Blur"); self.motion_blur_toggle.setChecked(self.settings.motion_blur)
+        left.addWidget(self.motion_blur_toggle)
+
+        # Frame range
+        self.start_frame_field = QtWidgets.QSpinBox(); self.start_frame_field.setRange(-100000, 100000); self.start_frame_field.setValue(self.settings.start_frame)
+        self.end_frame_field = QtWidgets.QSpinBox(); self.end_frame_field.setRange(-100000, 100000); self.end_frame_field.setValue(self.settings.end_frame)
+        left.addWidget(QtWidgets.QLabel("Start Frame:")); left.addWidget(self.start_frame_field)
+        left.addWidget(QtWidgets.QLabel("End Frame:")); left.addWidget(self.end_frame_field)
+
+        # Device
+        self.device_toggle = QtWidgets.QCheckBox("Use GPU Rendering"); self.device_toggle.setChecked(self.gpu_enabled)
+        left.addWidget(self.device_toggle)
+
+        # Project dir overrides
+        self.override_proj_checkbox = QtWidgets.QCheckBox("Use Scene Folder as Project Directory")
+        self.override_proj_checkbox.setToolTip("Use the folder where your current scene is saved as the render output and project directory.")
+        self.override_proj_checkbox.setChecked(True)
+        self.project_dir_checkbox = QtWidgets.QCheckBox("Use Custom Project Directory")
+        self.project_dir_checkbox.setChecked(False)
+        self.project_dir_field = QtWidgets.QLineEdit(); self.project_dir_field.setPlaceholderText("Choose custom project directory..."); self.project_dir_field.setEnabled(False)
+        self.project_dir_button = QtWidgets.QPushButton("Browse"); self.project_dir_button.setEnabled(False)
+
+        def toggle_custom_project():
+            enabled = self.project_dir_checkbox.isChecked()
+            self.project_dir_field.setEnabled(enabled)
+            self.project_dir_button.setEnabled(enabled)
+        def choose_directory():
+            folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Project Directory", cmds.workspace(q=True, rd=True))
+            if folder:
+                self.project_dir_field.setText(folder)
+
+        self.project_dir_checkbox.toggled.connect(toggle_custom_project)
+        self.project_dir_button.clicked.connect(choose_directory)
+
+        # Preview selected project directory
+        self.project_dir_preview = QtWidgets.QLabel(); self.project_dir_preview.setStyleSheet("color: gray; font-style: italic;")
+        left.addWidget(QtWidgets.QLabel("Render Output Path Preview:"))
+        left.addWidget(self.project_dir_preview)
+        left.addWidget(self.override_proj_checkbox)
+        left.addWidget(self.project_dir_checkbox)
+        left.addWidget(self.project_dir_field)
+        left.addWidget(self.project_dir_button)
+
+        # Command preview
+        self.cmd_preview = QtWidgets.QTextEdit(); self.cmd_preview.setReadOnly(True); self.cmd_preview.setMinimumHeight(50)
+        left.addWidget(QtWidgets.QLabel("Render Command Preview:"))
+        left.addWidget(self.cmd_preview)
+
+        left.addWidget(self._button("Update Preview", self.update_preview))
+        left.addWidget(self._button("Render", self.execute_render))
+        left.addWidget(self._button("Write .BAT File", self.write_bat_file))
+
+        # Live log (internal)
+        self.log_output = QtWidgets.QTextEdit(); self.log_output.setReadOnly(True); self.log_output.setMinimumHeight(80)
+        left.addWidget(QtWidgets.QLabel("Live Render Log:"))
+        left.addWidget(self.log_output)
+
+        self.progress = QtWidgets.QProgressBar(); left.addWidget(self.progress)
+
+        # Action buttons
+        btns = QtWidgets.QHBoxLayout()
+        self.wrong_btn = QtWidgets.QPushButton("W.R.O.N.G. Render"); self.wrong_btn.clicked.connect(self.internal_maya_render); btns.addWidget(self.wrong_btn)
+        self.cancel_btn = QtWidgets.QPushButton("Cancel Render"); self.cancel_btn.setEnabled(False); self.cancel_btn.clicked.connect(self.cancel_render); btns.addWidget(self.cancel_btn)
+        self.pause_btn = QtWidgets.QPushButton("Pause"); self.pause_btn.setEnabled(True); self.pause_btn.clicked.connect(self.toggle_pause); btns.addWidget(self.pause_btn)
+        left.addLayout(btns)
+
+        # Pause info
+        self.pause_reason_label = QtWidgets.QLabel("Render status: Active"); self.pause_reason_label.setStyleSheet("color: gray; font-style: italic;")
+        left.addWidget(self.pause_reason_label)
+
+        # Auto-pause / resume
+        self.pause_enable_checkbox = QtWidgets.QCheckBox("Enable Auto-Pause"); self.pause_enable_checkbox.setChecked(True)
+        self.resume_enable_checkbox = QtWidgets.QCheckBox("Enable Auto-Resume"); self.resume_enable_checkbox.setChecked(True)
+
+        self.pause_hour_spin = QtWidgets.QDoubleSpinBox(); self.pause_hour_spin.setDecimals(1); self.pause_hour_spin.setSingleStep(0.1); self.pause_hour_spin.setRange(0.0, 23.9); self.pause_hour_spin.setValue(self.pause_hour)
+        self.resume_hour_spin = QtWidgets.QDoubleSpinBox(); self.resume_hour_spin.setDecimals(1); self.resume_hour_spin.setSingleStep(0.1); self.resume_hour_spin.setRange(0.0, 23.9); self.resume_hour_spin.setValue(self.pause_hour + 1 if self.pause_hour < 23 else 0)
+
+        self.pause_enable_checkbox.toggled.connect(lambda c: self.pause_hour_spin.setEnabled(c))
+        self.resume_enable_checkbox.toggled.connect(lambda c: self.resume_hour_spin.setEnabled(c))
+
+        self.launch_paused_checkbox = QtWidgets.QCheckBox("Launch Paused"); self.launch_paused_checkbox.setToolTip("If checked, rendering starts in a paused state until resumed manually or by schedule.")
+        self.launch_paused_checkbox.setChecked(False)
+
+        label_pause = QtWidgets.QLabel("Auto-Pause Hour (0-23):"); label_pause.setStyleSheet("color: red; font-weight: bold;")
+        label_resume = QtWidgets.QLabel("Auto-Resume Hour (0-23):"); label_resume.setStyleSheet("color: green; font-weight: bold;")
+        left.addWidget(self.pause_enable_checkbox); left.addWidget(label_pause); left.addWidget(self.pause_hour_spin)
+        left.addWidget(self.resume_enable_checkbox); left.addWidget(label_resume); left.addWidget(self.resume_hour_spin)
+        left.addWidget(self.launch_paused_checkbox)
+
+        # Detailed log group (Arnold stats)
+        log_label = QtWidgets.QLabel("Detailed Arnold Render Log"); log_label.setStyleSheet("font-weight: bold; font-size: 8pt;")
+        log_group_widget = QtWidgets.QWidget(); self.log_group_widget = log_group_widget
+        log_group = QtWidgets.QVBoxLayout(log_group_widget)
+        log_group.addWidget(log_label)
+        self.batch_log_output = QtWidgets.QTextEdit(); self.batch_log_output.setReadOnly(True)
+        self.batch_log_output.setMinimumWidth(500)
+        self.batch_log_output.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        log_group.addWidget(self.batch_log_output)
+        clear_btn = QtWidgets.QPushButton("Clear Log"); clear_btn.clicked.connect(lambda: self.batch_log_output.clear())
+        log_group.addWidget(clear_btn)
+        main.insertWidget(1, log_group_widget, 1)
+
+    # ----------------- helpers -----------------
+    def _button(self, label, callback):
+        b = QtWidgets.QPushButton(label)
+        b.clicked.connect(callback)
+        return b
+
+    def _log(self, widget, msg):
+        widget.append(msg)
+        QtCore.QCoreApplication.processEvents()
+
+    def log(self, msg):
+        self._log(self.log_output, msg)
+
+    def log_batch(self, msg):
+        self._log(self.batch_log_output, msg)
+
+    def _update_pause_label(self):
+        self.pause_reason_label.setText("Render status: Paused (manual)" if self.paused else "Render status: Active")
+
+    # --------------- stats watcher ---------------
+    def start_log_watcher(self):
+        if not self.log_pattern:
+            return
+        if self.log_timer:
+            self.stop_log_watcher()
+        self.log_timer = QtCore.QTimer()
+        self.log_timer.timeout.connect(self.read_latest_stats_log)
+        self.log_timer.start(self.log_timer_interval)
+
+    def stop_log_watcher(self):
+        if self.log_timer:
+            self.log_timer.stop()
+            self.log_timer.deleteLater()
+            self.log_timer = None
+
+    def read_latest_stats_log(self):
+        files = sorted(glob.glob(self.log_pattern), key=os.path.getmtime)
+        if not files:
+            return
+        latest = files[-1]
+        stamp = f"{latest}:{os.path.getmtime(latest)}"
+        if stamp == self.last_log_stamp:
+            return
+        self.last_log_stamp = stamp
+        try:
+            with open(latest, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read().strip()
+                if not text:
+                    return
+                # Try line-delimited JSON first, else whole-file JSON
+                objs = []
+                for line in text.splitlines():
+                    try:
+                        objs.append(json.loads(line))
+                    except Exception:
+                        pass
+                data = objs[-1] if objs else json.loads(text)
+
+            render_keys = [k for k in data.keys() if k.startswith('render')]
+            latest_key = sorted(render_keys)[-1] if render_keys else None
+            render_data = data.get(latest_key, {}) if latest_key else {}
+
+            mem_bytes = ((render_data.get('peak CPU memory used') or {}).get('bytes'))
+            mem = f"{round(mem_bytes / (1024**2))} MB" if isinstance(mem_bytes, (int, float)) else "N/A"
+            ray_total = (((render_data.get('ray counts') or {}).get('total') or {}).get('ray count', 'N/A'))
+            t_us = ((render_data.get('frame time') or {}).get('microseconds', 0))
+            t_s = round(t_us / 1_000_000, 2) if t_us else 'N/A'
+            frame_id = (latest_key.split()[-1] if latest_key else "Unknown")
+
+            self.log_batch(f"[Stats] Frame {frame_id}: Time {t_s}s | Memory {mem} | Rays {ray_total}")
+        except Exception as e:
+            self.log_batch(f"[Stats] Failed to read: {e}")
+
+    # --------------- actions ---------------
+    def cancel_render(self):
+        self.cancelled = True
+        self.log("Render cancel requested by user.")
+        self.cancel_btn.setEnabled(False)
+        self.wrong_btn.setEnabled(True)
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+        self.pause_btn.setText("Resume" if self.paused else "Pause")
+        self._update_pause_label()
+        self.log("Render paused." if self.paused else "Resuming render.")
+
+    def _resolve_project_dir(self):
+        if self.project_dir_checkbox.isChecked():
+            return self.project_dir_field.text() or self.settings.scene_dir
+        if self.override_proj_checkbox.isChecked():
+            return self.settings.scene_dir
+        return cmds.workspace(q=True, rd=True)
+
+    def _find_render_exe(self):
+        # Prefer PATH
+        for p in os.environ.get("PATH", "").split(os.pathsep):
+            exe = os.path.join(p, "Render.exe")
+            if os.path.isfile(exe):
+                return exe
+        # Common installs
+        for year in ("2025", "2024", "2023", "2022"):
+            exe = fr"C:\\Program Files\\Autodesk\\Maya{year}\\bin\\Render.exe"
+            if os.path.isfile(exe):
+                return exe
+        raise FileNotFoundError("Could not locate Render.exe. Please add it to PATH or install Maya.")
+
+    def execute_render(self):
+        # External batch render via Render.exe
+        if not self.settings.camera:
+            QtWidgets.QMessageBox.critical(self, "No Renderable Camera", "No renderable camera found in scene.")
+            return
+
+        render_path = self._find_render_exe()
+        proj_dir = self._resolve_project_dir()
+        self.settings.cli["Project Directory"] = ("-proj", proj_dir)
+        os.environ['MTOA_RENDER_DEVICE'] = 'GPU' if self.device_toggle.isChecked() else 'CPU'
+
+        # Ensure width/height flags reflect current multiplier
+        mult = self.res_mult.value()
+        base_w = int(cmds.getAttr("defaultResolution.width"))
+        base_h = int(cmds.getAttr("defaultResolution.height"))
+        w, h = int(base_w * mult), int(base_h * mult)
+        self.settings.cli["Width"] = ("-x", str(w))
+        self.settings.cli["Height"] = ("-y", str(h))
+
+        full_cmd = [render_path] + self.settings.get_command_args()
+        self.log_batch("Starting external Arnold render...")
+        try:
+            proc = subprocess.Popen(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+            for line in proc.stdout:
+                self.log_batch(line.rstrip())
+            proc.wait()
+            if proc.returncode != 0:
+                self.log_batch(f"Render.exe exited with error code {proc.returncode}")
+                QtWidgets.QMessageBox.critical(self, "Render Failed", f"Render.exe failed with code {proc.returncode}")
+            else:
+                self.log_batch("Render.exe finished successfully.")
+        except Exception as e:
+            self.log_batch(f"Error launching render: {e}")
+            QtWidgets.QMessageBox.critical(self, "Render Error", f"Render failed: {e}")
+
+    def write_bat_file(self):
+        filepath, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save .BAT File", self.settings.scene_name + ".bat", "Batch Files (*.bat)")
+        if not filepath:
+            return
+        try:
+            render_path = self._find_render_exe()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Missing Render.exe", str(e))
+            return
+
+        proj_dir = self._resolve_project_dir()
+        self.settings.cli["Project Directory"] = ("-proj", proj_dir)
+
+        # Compute width/height flags from current multiplier
+        mult = self.res_mult.value()
+        base_w = int(cmds.getAttr("defaultResolution.width"))
+        base_h = int(cmds.getAttr("defaultResolution.height"))
+        w, h = int(base_w * mult), int(base_h * mult)
+        self.settings.cli["Width"] = ("-x", str(w))
+        self.settings.cli["Height"] = ("-y", str(h))
+
+        args = self.settings.get_command_args()
+        cmd_line = f'"{render_path}" ' + " ".join(f'"{a}"' if " " in a else a for a in args)
+        mtoa_env = "set MTOA_RENDER_DEVICE=GPU" if self.device_toggle.isChecked() else "set MTOA_RENDER_DEVICE=CPU"
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("@echo off\n")
+                f.write("chcp 65001 >nul\n")
+                f.write(mtoa_env + "\n")
+                f.write(cmd_line + "\n")
+                f.write("pause\n")
+            QtWidgets.QMessageBox.information(self, "Batch File Saved", f".BAT file written to: {filepath}")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Write Failed", f"Could not write BAT file: {e}")
+
+    def internal_maya_render(self):
+        # Kick off stats
+        self.start_log_watcher()
+
+        # Close RenderView to avoid crashes
+        if cmds.window("renderViewWindow", exists=True):
+            try:
+                cmds.deleteUI("renderViewWindow", window=True)
+                self.log("Closed RenderView window to prevent crashes.")
+            except Exception:
+                self.log("Warning: could not close RenderView.")
+
+        if not self.settings.camera:
+            QtWidgets.QMessageBox.critical(self, "No Renderable Camera", "No renderable camera found in scene.")
+            return
+
+        self.cancelled = False
+        self.cancel_btn.setEnabled(True)
+        self.wrong_btn.setEnabled(False)
+
+        # Workspace images rule (keep root dir stable; we move frames ourselves)
+        cmds.workspace(fileRule=['images', self.settings.render_dir])
+        cmds.workspace(saveWorkspace=True)
+
+        # Stats logging path
+        stats_dir = os.path.join(self.settings.render_dir, "logs")
+        os.makedirs(stats_dir, exist_ok=True)
+        self.log_pattern = os.path.join(stats_dir, f"{self.settings.scene_name}.*.arnold_stats*")
+        stats_path = os.path.join(stats_dir, f"{self.settings.scene_name}.arnold_stats")
+        try:
+            cmds.setAttr("defaultArnoldRenderOptions.stats_enable", 1)
+            cmds.setAttr("defaultArnoldRenderOptions.stats_file", stats_path, type="string")
+        except Exception:
+            pass
+
+        # Device for internal render
+        try:
+            cmds.setAttr('defaultArnoldRenderOptions.renderDevice', 1 if self.device_toggle.isChecked() else 0)
+        except Exception:
+            pass
+
+        # Frame range
+        start = self.start_frame_field.value()
+        end = self.end_frame_field.value()
+        cam = self.settings.camera
+        total = end - start + 1
+        self.progress.setMaximum(max(0, total))
+        self.progress.setValue(0)
+
+        # Version selection (single point of truth)
+        base_dir = self.settings.render_dir
+        base_name = self.settings.scene_name
+        if self.version_checkbox.isChecked():
+            if self.version_specific_radio.isChecked():
+                ver = self.version_spinbox.value()
+            else:
+                ver = self.settings.get_next_version_number(base_dir, base_name)
+        else:
+            ver = 0
+        self.settings.current_version = ver
+        self.settings.version_folder = base_dir if ver == 0 else os.path.join(base_dir, f"v{ver:03d}")
+        os.makedirs(self.settings.version_folder, exist_ok=True)
+
+        # Resolution handling (temporary scene mutation, restore after)
+        mult = self.res_mult.value()
+        orig_w = int(cmds.getAttr("defaultResolution.width"))
+        orig_h = int(cmds.getAttr("defaultResolution.height"))
+        new_w = int(orig_w * mult)
+        new_h = int(orig_h * mult)
+        try:
+            cmds.setAttr("defaultResolution.width", new_w)
+            cmds.setAttr("defaultResolution.height", new_h)
+        except Exception:
+            pass
+
+        # Update Arnold settings from UI to scene
+        try:
+            cmds.setAttr("defaultArnoldRenderOptions.AASamples", self.aa_spin.value())
+            if cmds.attributeQuery("AASamplesMax", node="defaultArnoldRenderOptions", exists=True):
+                cmds.setAttr("defaultArnoldRenderOptions.AASamplesMax", self.max_aa_spin.value())
+            cmds.setAttr("defaultArnoldRenderOptions.AA_adaptive_threshold", self.adaptive_threshold_field.value())
+            cmds.setAttr("defaultArnoldRenderOptions.motion_blur_enable", self.motion_blur_toggle.isChecked())
+            cmds.setAttr("defaultRenderGlobals.startFrame", start)
+            cmds.setAttr("defaultRenderGlobals.endFrame", end)
+        except Exception:
+            pass
+
+        # Launch paused option
+        self.render_start_time = datetime.datetime.now()
+        self.paused = self.launch_paused_checkbox.isChecked()
+        self.pause_btn.setText("Resume" if self.paused else "Pause")
+        self._update_pause_label()
+
+        frame_times = []
+        start_wall = time.time()
+
+        for i, frame in enumerate(range(start, end + 1), 1):
+            if self.cancelled:
+                self.log(f"Render aborted at frame {frame}.")
+                break
+
+            # Auto-pause window logic
+            if self.pause_enable_checkbox.isChecked():
+                now = datetime.datetime.now()
+                current_h = now.hour + now.minute / 60.0
+                pause_h = self.pause_hour_spin.value()
+                # If we've crossed the pause time since launch and not yet paused, pause
+                launch_h = self.render_start_time.hour + self.render_start_time.minute / 60.0
+                # Normalize day wrap
+                if current_h < launch_h:
+                    current_h += 24.0
+                if pause_h < launch_h:
+                    pause_h += 24.0
+                if launch_h < pause_h <= current_h and not self.paused:
+                    self.log(f"Auto-pausing: it is after {self.pause_hour_spin.value():.1f}.")
+                    self.paused = True
+                    self.pause_btn.setText("Resume")
+                    self._update_pause_label()
+
+            # Pause loop (with auto-resume)
+            while self.paused:
+                QtCore.QCoreApplication.processEvents()
+                time.sleep(0.5)
+                if self.resume_enable_checkbox.isChecked():
+                    now = datetime.datetime.now()
+                    current_h = now.hour + now.minute / 60.0
+                    resume_h = self.resume_hour_spin.value()
+                    if current_h >= resume_h:
+                        self.log(f"Auto-resuming: it is after {resume_h:.1f}.")
+                        self.paused = False
+                        self.pause_btn.setText("Pause")
+                        self._update_pause_label()
+                        break
+
+            self.log(f"Rendering frame {frame} with camera {cam}...")
+            self.log_batch(f"Rendering frame {frame} with camera {cam}...")
+
+            frame_t0 = time.time()
+            try:
+                cmds.currentTime(frame)
+                mel.eval(f'arnoldRender -cam "{cam}" {frame};')
+            except Exception as e:
+                self.log_batch(f"[Error] Arnold render call failed: {e}")
+                break
+
+            # ETA
+            dt = time.time() - frame_t0
+            frame_times.append(dt)
+            avg = sum(frame_times) / max(1, len(frame_times))
+            remaining = (end - frame) * avg
+            hrs, rem = divmod(int(remaining), 3600)
+            mins, _ = divmod(rem, 60)
+            eta_str = f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
+            finish_ts = time.localtime(start_wall + sum(frame_times) + remaining)
+            finish_str = time.strftime("%H:%M", finish_ts)
+            self.log(f"Frame {frame} done in {round(dt, 2)} sec — ETA: {eta_str} (finishing ~{finish_str})")
+            self.log_batch(f"Frame {frame} done in {round(dt, 2)} sec — ETA: {eta_str} (finishing ~{finish_str})")
+
+            # Move from temp if RenderView dumps there
+            tmp_dir = os.path.join(self.settings.render_dir, "tmp")
+            if os.path.exists(tmp_dir):
+                for f in os.listdir(tmp_dir):
+                    if f.lower().endswith('.exr'):
+                        src = os.path.join(tmp_dir, f)
+                        dest = self.settings.build_versioned_dest(self.settings.render_dir, base_name, ver, frame)
+                        self._move_frame(src, dest)
+
+            self.progress.setValue(i)
+            self.read_latest_stats_log()
+            QtCore.QCoreApplication.processEvents()
+
+        # Restore original res after internal rendering
+        try:
+            cmds.setAttr("defaultResolution.width", orig_w)
+            cmds.setAttr("defaultResolution.height", orig_h)
+        except Exception:
+            pass
+
+        self.cancel_btn.setEnabled(False)
+        self.wrong_btn.setEnabled(True)
+        if not self.cancelled:
+            self.stop_log_watcher()
+            total_secs = time.time() - start_wall
+            mins, secs = divmod(int(total_secs), 60)
+            hrs, mins = divmod(mins, 60)
+            self.log(f"W.R.O.N.G. Render complete in {hrs}h {mins}m {secs}s.")
+            self.log_batch(f"W.R.O.N.G. Render complete in {hrs}h {mins}m {secs}s.")
+
+    def _move_frame(self, src, dest):
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.move(src, dest)
+            self.log(f"Moved: {src} -> {dest}")
+        except Exception as e:
+            self.log(f"[Error] Moving frame: {e}")
+
+    def restore_original_resolution(self):
+        width = int(cmds.getAttr("defaultResolution.width"))
+        height = int(cmds.getAttr("defaultResolution.height"))
+        self.res_mult.setValue(1.0)
+        self.res_label.setText(f"Resolution: {width} x {height}")
+        self.log("Restored original resolution multiplier.")
+
+    def update_preview(self):
+        # Ensure stats dir exists and configure watcher pattern
+        stats_dir = os.path.join(self.settings.render_dir, "logs")
+        os.makedirs(stats_dir, exist_ok=True)
+        self.log_pattern = os.path.join(stats_dir, f"{self.settings.scene_name}.*.arnold_stats*")
+
+        # Compute effective resolution for external flags
+        mult = self.res_mult.value()
+        base_w = int(cmds.getAttr("defaultResolution.width"))
+        base_h = int(cmds.getAttr("defaultResolution.height"))
+        w, h = int(base_w * mult), int(base_h * mult)
+        self.settings.resolution_x = w
+        self.settings.resolution_y = h
+
+        # Update Arnold attrs from UI where appropriate (AA/etc) but avoid mutating res here
+        try:
+            self.settings.aa_samples = self.aa_spin.value(); cmds.setAttr("defaultArnoldRenderOptions.AASamples", self.settings.aa_samples)
+            if cmds.attributeQuery("AASamplesMax", node="defaultArnoldRenderOptions", exists=True):
+                self.settings.aa_max = self.max_aa_spin.value(); cmds.setAttr("defaultArnoldRenderOptions.AASamplesMax", self.settings.aa_max)
+            self.settings.adaptive_threshold = self.adaptive_threshold_field.value(); cmds.setAttr("defaultArnoldRenderOptions.AA_adaptive_threshold", self.settings.adaptive_threshold)
+            self.settings.motion_blur = self.motion_blur_toggle.isChecked(); cmds.setAttr("defaultArnoldRenderOptions.motion_blur_enable", self.settings.motion_blur)
+            self.settings.start_frame = self.start_frame_field.value(); cmds.setAttr("defaultRenderGlobals.startFrame", self.settings.start_frame)
+            self.settings.end_frame = self.end_frame_field.value(); cmds.setAttr("defaultRenderGlobals.endFrame", self.settings.end_frame)
+        except Exception:
+            pass
+
+        # Mirror device choice to Arnold for internal runs
+        try:
+            cmds.setAttr('defaultArnoldRenderOptions.renderDevice', 1 if self.device_toggle.isChecked() else 0)
+        except Exception:
+            pass
+
+        # Update CLI flags (external)
+        self.settings.cli["Start Frame"] = ("-s", str(self.settings.start_frame))
+        self.settings.cli["End Frame"] = ("-e", str(self.settings.end_frame))
+        self.settings.cli["Width"] = ("-x", str(w))
+        self.settings.cli["Height"] = ("-y", str(h))
+        proj_dir = self._resolve_project_dir()
+        self.settings.cli["Project Directory"] = ("-proj", proj_dir)
+
+        self.res_label.setText(f"Resolution: {w} x {h}")
+        gpu_flag = "MTOA_RENDER_DEVICE=GPU" if self.device_toggle.isChecked() else "MTOA_RENDER_DEVICE=CPU"
+        self.cmd_preview.setText(f"{gpu_flag} {self.settings.get_command_string()}")
+        self.project_dir_preview.setText(proj_dir)
+
+    def toggle_version_fields(self):
+        enabled = self.version_checkbox.isChecked()
+        self.version_auto_radio.setEnabled(enabled)
+        self.version_specific_radio.setEnabled(enabled)
+        self.version_spinbox.setEnabled(enabled and self.version_specific_radio.isChecked())
+        self.version_specific_radio.toggled.connect(lambda checked: self.version_spinbox.setEnabled(enabled and checked))
+
+
+# ------------------------------
+# Entrypoint
+# ------------------------------
+if __name__ == "__main__":
+    try:
+        ui.close(); ui.deleteLater()
+    except Exception:
+        pass
+    ui = RenderBatchUI()
+    ui.show()
