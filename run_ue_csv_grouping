@@ -1,0 +1,299 @@
+# UE CSV → Maya Grouped Transforms (Deterministic, Per-Actor Duplicate, Cleanup)
+# v1.2 — default "direct" Euler passthrough so CSV signs are preserved
+from __future__ import annotations
+import csv, os, re, math
+from maya import cmds
+from maya.api import OpenMaya as om2
+
+# ---------------- CONFIG ----------------
+# Use "direct" to set rotations exactly as in CSV: group.rx = roll, group.ry = yaw, group.rz = pitch
+# Use "basis" to apply UE→Maya basis mapping via matrices (older behavior)
+_ROTATION_MODE = "direct"   # "direct" or "basis"
+
+# ---------------- parsing / normalization ----------------
+_ASSET_FROM_GEOMETRIES_RE = re.compile(r'/Geometries/([^./\\]+)\.([^./\\]+)$')
+_SM_PREFIXES = ('SM_', 'sm_', 'MESH_', 'mesh_')
+_NON_ALNUM_RE = re.compile(r'[^a-z0-9]+')
+
+def _strip_ns_shape(n: str) -> str:
+    if not n: return ""
+    n = n.split('|')[-1].split(':')[-1]
+    return n[:-5] if n.endswith('Shape') else n
+
+def _norm_key(s: str) -> str:
+    if not s: return ""
+    s = _NON_ALNUM_RE.sub('_', s.lower())
+    while '__' in s: s = s.replace('__', '_')
+    return s.strip('_')
+
+def asset_key_from_csv(static_mesh: str, mesh_path: str) -> str:
+    cand = ""
+    if mesh_path:
+        m = _ASSET_FROM_GEOMETRIES_RE.search(mesh_path)
+        if m: cand = m.group(2)
+    if not cand and static_mesh:
+        cand = static_mesh.split('/')[-1].split('\\')[-1]
+    if not cand: return ""
+    for pre in _SM_PREFIXES:
+        if cand.startswith(pre):
+            cand = cand[len(pre):]
+            break
+    return _norm_key(cand)
+
+def maya_template_key_from_geo(xform_name: str) -> str:
+    n = _strip_ns_shape(xform_name)
+    if not n or not n.lower().endswith('_geo'):
+        return ""
+    core = n[:-4]
+    if core.lower().startswith('g_'):
+        core = core[2:]
+    return _norm_key(core)
+
+# ---------------- lookups ----------------
+def build_template_lookup_by_asset_key():
+    """asset key -> [template transforms]; prefer loose templates (not under *_GRP) and non 'G_' first"""
+    lut = {}
+    for shape in cmds.ls(type='mesh', ni=True) or []:
+        xforms = cmds.listRelatives(shape, p=True, f=False) or []
+        if not xforms: continue
+        x = xforms[0]
+        key = maya_template_key_from_geo(x)
+        if not key: continue
+        parent = (cmds.listRelatives(x, p=True, f=False) or [None])[0]
+        loose_score = 0 if (not parent or not parent.endswith('_GRP')) else 1
+        lut.setdefault(key, []).append((loose_score, x))
+    def sort_key(pair):
+        score, name = pair
+        short = _strip_ns_shape(name).lower()
+        gscore = 0 if not short.startswith('g_') else 1
+        return (score, gscore, short)
+    for k, arr in lut.items():
+        arr.sort(key=sort_key)
+        lut[k] = [x for _, x in arr]
+    return lut
+
+def find_existing_actor_child(actor: str, desired_child_short: str) -> str | None:
+    grp = f"{_strip_ns_shape(actor)}_GRP"
+    if not cmds.objExists(grp):
+        return None
+    kids = cmds.listRelatives(grp, c=True, type='transform', f=False) or []
+    for ch in kids:
+        if _strip_ns_shape(ch) == desired_child_short:
+            return ch
+    return None
+
+# ---------------- position + (optional) basis rotation ----------------
+_CM_PER_UNIT = {'mm':0.1,'cm':1.0,'m':100.0,'in':2.54,'ft':30.48,'yd':91.44}
+def unit_scale_from_cm():
+    u = cmds.currentUnit(q=True, linear=True)
+    return 1.0 / _CM_PER_UNIT.get(u, 1.0)
+
+# UE->Maya basis (for "basis" mode only)
+_R  = om2.MMatrix(((1,0,0,0),
+                   (0,0,1,0),
+                   (0,-1,0,0),
+                   (0,0,0,1)))
+_Rt = _R.transpose()
+def _rx(a): c,s=math.cos(a),math.sin(a); return om2.MMatrix(((1,0,0,0),(0,c,-s,0),(0,s,c,0),(0,0,0,1)))
+def _ry(a): c,s=math.cos(a),math.sin(a); return om2.MMatrix(((c,0,s,0),(0,1,0,0),(-s,0,c,0),(0,0,0,1)))
+def _rz(a): c,s=math.cos(a),math.sin(a); return om2.MMatrix(((c,-s,0,0),(s,c,0,0),(0,0,1,0),(0,0,0,1)))
+
+def ue_trs_to_maya_matrix(locx_cm, locy_cm, locz_cm, pitch_deg, yaw_deg, roll_deg) -> list[float]:
+    """Return a flat 16-float list for cmds.xform -m (used only if _ROTATION_MODE == 'basis')."""
+    s = unit_scale_from_cm()
+    tx, ty, tz = locx_cm*s, locz_cm*s, locy_cm*s
+    p,y,r = map(math.radians, (pitch_deg, yaw_deg, roll_deg))
+    rotUE   = _rz(y) * _ry(p) * _rx(r)
+    rotMaya = _R * rotUE * _Rt
+    mt = om2.MTransformationMatrix(rotMaya)
+    mt.setTranslation(om2.MVector(tx, ty, tz), om2.MSpace.kWorld)
+    M = mt.asMatrix()
+    # Flatten row-major (M[i] is already flat element 0..15)
+    return [float(M[i]) for i in range(16)]
+
+def ue_pos_to_maya_xyz(locx_cm, locy_cm, locz_cm):
+    """Position mapping kept (UE cm → Maya current units; UE(Y)→Maya Z)."""
+    s = unit_scale_from_cm()
+    return (locx_cm*s, locz_cm*s, locy_cm*s)
+
+# ---------------- utils ----------------
+def _unique_name(base):
+    if not cmds.objExists(base):
+        return base
+    i = 1
+    while True:
+        cand = f"{base}_{i:02d}"
+        if not cmds.objExists(cand):
+            return cand
+        i += 1
+
+def ensure_pivoted_group(target_node, grp_name):
+    """Create (or reuse) <Actor>_GRP above target_node; align group's pivots to child's rp."""
+    grp_name = _unique_name(grp_name)
+    parent = cmds.listRelatives(target_node, p=True, f=False)
+    if parent and parent[0].endswith('_GRP'):
+        grp = parent[0]
+        rp = cmds.xform(target_node, q=True, ws=True, rp=True)
+        cmds.xform(grp, ws=True, rp=rp, sp=rp)
+        return grp
+    wm = cmds.xform(target_node, q=True, ws=True, m=True)
+    rp = cmds.xform(target_node, q=True, ws=True, rp=True)
+    grp = cmds.createNode('transform', name=grp_name)
+    if parent:
+        cmds.parent(grp, parent[0])
+    cmds.xform(grp, ws=True, m=wm)
+    cmds.xform(grp, ws=True, rp=rp, sp=rp)
+    cmds.parent(target_node, grp, relative=True)
+    return grp
+
+# ---------------- main ----------------
+def import_csv_apply_groups(csv_path, strict_only=True, delete_templates=True):
+    csv_path = os.path.expanduser(csv_path)
+    if not os.path.isfile(csv_path):
+        cmds.warning("CSV not found: {}".format(csv_path)); return
+
+    template_by_asset = build_template_lookup_by_asset_key()
+    templates_used = set()
+
+    total, placed = 0, 0
+    missing_assets, parse_errors = [], []
+
+    # read CSV
+    with open(csv_path, newline='') as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        cmds.warning("CSV is empty."); return
+
+    header = rows[0]
+    if any(h.lower() in ('actor','staticmesh','meshpath','locx','pitch') for h in header):
+        lower = [h.lower() for h in header]
+        def find(col):
+            try: return lower.index(col.lower())
+            except ValueError: return None
+        idx = {
+            'Actor': find('actor'),
+            'StaticMesh': find('staticmesh'),
+            'MeshPath': find('meshpath'),
+            'LocX': find('locx'),
+            'LocY': find('locy'),
+            'LocZ': find('locz'),
+            'Pitch': find('pitch'),
+            'Yaw': find('yaw'),
+            'Roll': find('roll'),
+        }
+        data_rows = rows[1:]
+    else:
+        idx = {'Actor':0,'StaticMesh':1,'MeshPath':2,'LocX':3,'LocY':4,'LocZ':5,'Pitch':6,'Yaw':7,'Roll':8}
+        data_rows = rows
+
+    for r in data_rows:
+        total += 1
+        try:
+            actor      = r[idx['Actor']].strip() if idx['Actor'] is not None else ""
+            staticMesh = r[idx['StaticMesh']].strip() if idx['StaticMesh'] is not None else ""
+            meshPath   = r[idx['MeshPath']].strip() if idx['MeshPath'] is not None else ""
+            lx = float(r[idx['LocX']]) if idx['LocX'] is not None else 0.0
+            ly = float(r[idx['LocY']]) if idx['LocY'] is not None else 0.0
+            lz = float(r[idx['LocZ']]) if idx['LocZ'] is not None else 0.0
+            pt = float(r[idx['Pitch']]) if idx['Pitch'] is not None else 0.0
+            yw = float(r[idx['Yaw']])   if idx['Yaw']   is not None else 0.0
+            rl = float(r[idx['Roll']])  if idx['Roll']  is not None else 0.0
+        except Exception:
+            parse_errors.append(tuple(r)); continue
+
+        asset_key = asset_key_from_csv(staticMesh, meshPath)
+        if not asset_key:
+            if strict_only:
+                missing_assets.append((actor, staticMesh))
+            continue
+
+        templates = template_by_asset.get(asset_key, [])
+        if not templates:
+            if strict_only:
+                missing_assets.append((actor, staticMesh))
+            continue
+
+        template = templates[0]
+        templates_used.add(template)
+
+        # Child name = template's short transform name (exact)
+        desired_child = _strip_ns_shape(template)
+
+        # Reuse existing child if already under <Actor>_GRP
+        existing = find_existing_actor_child(actor, desired_child)
+        if existing:
+            child = existing
+        else:
+            # Duplicate (not instance) from template (independent shape)
+            child = cmds.duplicate(template, rr=True)[0]
+            try:
+                child = cmds.rename(child, desired_child)
+            except Exception:
+                pass  # if Maya forces uniqueness, keep whatever it picks
+
+        # Ensure actor group exists & parent child (keep world)
+        grp_name = f"{_strip_ns_shape(actor)}_GRP"
+        if not cmds.objExists(grp_name):
+            grp = ensure_pivoted_group(child, grp_name=grp_name)
+        else:
+            try:
+                cmds.parent(child, grp_name, relative=True)
+            except Exception:
+                pass
+            grp = grp_name
+            rp = cmds.xform(child, q=True, ws=True, rp=True)
+            cmds.xform(grp, ws=True, rp=rp, sp=rp)
+
+        # ---- Place group ----
+        # Position always mapped UE->Maya (X, Z, Y) with unit scaling
+        tx, ty, tz = ue_pos_to_maya_xyz(lx, ly, lz)
+        try: cmds.setAttr(grp + ".rotateOrder", 0)  # 0 == xyz
+        except Exception: pass
+        cmds.xform(grp, ws=True, t=(tx, ty, tz))
+
+        if _ROTATION_MODE == "direct":
+            # Preserve sign exactly from CSV:
+            # UE exports columns as Pitch, Yaw, Roll — we set Maya (rx, ry, rz) = (Roll, Yaw, Pitch)
+            cmds.xform(grp, ws=False, ro=(rl, yw, pt))
+        else:
+            # Basis-mapped matrix placement (older behavior)
+            flat16 = ue_trs_to_maya_matrix(lx, ly, lz, pt, yw, rl)
+            cmds.xform(grp, ws=True, m=flat16)
+
+        placed += 1
+
+    print(f"[UE→Maya] Rows processed: {total}")
+    print(f"[UE→Maya] Meshes placed: {placed}")
+    if missing_assets:
+        print(f"[UE→Maya] Missing templates for assets ({len(missing_assets)}). Showing up to 25:")
+        for a,s in missing_assets[:25]:
+            print(f"  - {a} / {s}")
+        if len(missing_assets) > 25:
+            print(f"  ... {len(missing_assets)-25} more")
+    if parse_errors:
+        print(f"[UE→Maya] Rows with parse errors: {len(parse_errors)}")
+
+    # Delete any template transforms we touched that are not under an *_GRP
+    if delete_templates and templates_used:
+        to_delete = []
+        for t in templates_used:
+            parent = (cmds.listRelatives(t, p=True, f=False) or [None])[0]
+            if not parent or not parent.endswith('_GRP'):
+                to_delete.append(t)
+        if to_delete:
+            try:
+                cmds.delete(to_delete)
+                print(f"[UE→Maya] Deleted {len(to_delete)} template source(s).")
+            except Exception:
+                cmds.warning("[UE→Maya] Failed to delete some template sources.")
+
+def run_ue_csv_grouping(csv_path=None):
+    if not csv_path:
+        sel = cmds.fileDialog2(fileMode=1, caption="Choose Unreal CSV", okCaption="Load", fileFilter="CSV (*.csv)")
+        if not sel: return
+        csv_path = sel[0]
+    import_csv_apply_groups(csv_path, strict_only=True, delete_templates=True)
+
+# ---- Run ----
+if __name__ == "__main__":
+    run_ue_csv_grouping()
