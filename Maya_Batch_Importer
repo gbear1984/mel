@@ -1,0 +1,422 @@
+# Batch MB Importer — No Namespaces, Optional Grouping (<basename>_GRP), Viewport Toggle
+# Maya 2018–2025 (PySide2)
+# Author: ChatGPT (for Steve)
+
+from __future__ import annotations
+import os
+import re
+import traceback
+
+from maya import cmds, mel
+import maya.utils as mutils
+
+# ---- Qt setup ----
+try:
+    from PySide2 import QtWidgets, QtCore, QtGui
+    from shiboken2 import wrapInstance
+except ImportError:
+    from PySide import QtGui as QtWidgets
+    from PySide import QtCore, QtGui
+    wrapInstance = None
+
+# ---- Utils ----
+def normalize_path(p):
+    return os.path.normpath(os.path.expanduser(p))
+
+def nice_time(ms):
+    s = int(ms / 1000.0)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m {s}s"
+
+def _mel_safe(cmd: str):
+    try:
+        mel.eval(cmd)
+        return True
+    except Exception:
+        return False
+
+# ---- Main UI Dialog ----
+class BatchMBImporter(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super(BatchMBImporter, self).__init__(parent)
+        self.setWindowTitle("Batch MB Importer (No Namespace / Grouping / Viewport)")
+        self.setMinimumWidth(760)
+
+        # State
+        self.files = []
+        self.current_index = 0
+        self.running = False
+        self.paused = False
+        self.busy = False
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(150)
+        self.timer.timeout.connect(self._tick)
+        self.started_ms = 0
+
+        # Widgets
+        self.folder_edit = QtWidgets.QLineEdit()
+        self.browse_btn = QtWidgets.QPushButton("Browse…")
+        self.scan_btn = QtWidgets.QPushButton("Scan")
+        self.list_widget = QtWidgets.QListWidget()
+        self.list_widget.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.start_btn = QtWidgets.QPushButton("Start")
+        self.pause_btn = QtWidgets.QPushButton("Pause")
+        self.stop_btn = QtWidgets.QPushButton("Stop")
+        self.close_btn = QtWidgets.QPushButton("Close")
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+
+        self.progress = QtWidgets.QProgressBar()
+        self.status_lbl = QtWidgets.QLabel("Idle.")
+        self.status_lbl.setWordWrap(True)
+
+        # Options
+        self.new_scene_chk = QtWidgets.QCheckBox("New scene per file")
+        self.new_scene_chk.setChecked(False)
+
+        self.group_under_null_chk = QtWidgets.QCheckBox('Group imported nodes under "<file>_GRP"')
+        self.group_under_null_chk.setChecked(True)
+
+        self.center_pivot_chk = QtWidgets.QCheckBox("Center pivots on group after import")
+        self.center_pivot_chk.setChecked(False)
+
+        self.undo_chunk_chk = QtWidgets.QCheckBox("Wrap each import in an undo chunk")
+        self.undo_chunk_chk.setChecked(True)
+
+        self.skip_errors_chk = QtWidgets.QCheckBox("Skip files that error (continue batch)")
+        self.skip_errors_chk.setChecked(True)
+
+        # Viewport toggle
+        self.viewport_btn = QtWidgets.QPushButton("Viewport: ON")
+        self.viewport_btn.setCheckable(True)
+        self.viewport_btn.setChecked(False)  # unchecked = viewport ON
+        self.viewport_btn.clicked.connect(self._toggle_viewport_clicked)
+
+        # Log
+        self.log = QtWidgets.QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setPlaceholderText("Log…")
+
+        # Layout
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(QtWidgets.QLabel("Folder:"))
+        top.addWidget(self.folder_edit, 1)
+        top.addWidget(self.browse_btn)
+        top.addWidget(self.scan_btn)
+
+        opts_layout = QtWidgets.QGridLayout()
+        opts_layout.addWidget(self.new_scene_chk,        0, 0)
+        opts_layout.addWidget(self.group_under_null_chk, 0, 1)
+        opts_layout.addWidget(self.center_pivot_chk,     0, 2)
+        opts_layout.addWidget(self.undo_chunk_chk,       1, 0)
+        opts_layout.addWidget(self.skip_errors_chk,      1, 1)
+        opts_layout.addWidget(self.viewport_btn,         1, 2)
+
+        btns = QtWidgets.QHBoxLayout()
+        btns.addWidget(self.start_btn)
+        btns.addWidget(self.pause_btn)
+        btns.addWidget(self.stop_btn)
+        btns.addStretch(1)
+        btns.addWidget(self.close_btn)
+
+        v = QtWidgets.QVBoxLayout(self)
+        v.addLayout(top)
+        v.addLayout(opts_layout)
+        v.addWidget(self.list_widget, 2)
+        v.addWidget(self.progress)
+        v.addWidget(self.status_lbl)
+        v.addWidget(self.log, 1)
+        v.addLayout(btns)
+
+        # Signals
+        self.browse_btn.clicked.connect(self._choose_folder)
+        self.scan_btn.clicked.connect(self._scan_folder)
+        self.start_btn.clicked.connect(self._start)
+        self.pause_btn.clicked.connect(self._toggle_pause)
+        self.stop_btn.clicked.connect(self._stop)
+        self.close_btn.clicked.connect(self.close)
+
+        self._last_folder = ""
+
+    # ---------- Viewport toggle ----------
+    def _toggle_viewport_clicked(self, checked):
+        # checked == True means "Viewport OFF"
+        try:
+            cmds.refresh(suspend=checked)
+            if checked:
+                self.viewport_btn.setText("Viewport: OFF")
+                self._log("[Viewport] Suspended viewport refresh.")
+            else:
+                self.viewport_btn.setText("Viewport: ON")
+                cmds.refresh(force=True)
+                self._log("[Viewport] Resumed viewport refresh.")
+        except Exception as e:
+            self._log(f"[Viewport] Error: {e}")
+
+    # ---------- Name helpers ----------
+    def _sanitize_maya_name(self, base):
+        s = re.sub(r'[^A-Za-z0-9_]', '_', base)
+        if not s or not re.match(r'^[A-Za-z_]', s):
+            s = f"G_{s}"
+        return s
+
+    def _unique_leaf(self, name):
+        if not cmds.objExists(name):
+            return name
+        i = 2
+        while cmds.objExists(f"{name}_{i}"):
+            i += 1
+        return f"{name}_{i}"
+
+    # ---------- UI Actions ----------
+    def _choose_folder(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose Folder Containing .mb Files")
+        if folder:
+            self.folder_edit.setText(folder)
+            self._scan_folder()
+
+    def _scan_folder(self):
+        folder = normalize_path(self.folder_edit.text().strip())
+        self.list_widget.clear()
+        self.files = []
+        if not folder or not os.path.isdir(folder):
+            self._log(f"Folder not found: {folder}")
+            self._set_status("Folder not found.")
+            return
+
+        all_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(".mb")]
+        self.files = sorted(all_files, key=lambda p: p.lower())
+        for f in self.files:
+            item = QtWidgets.QListWidgetItem(os.path.basename(f))
+            item.setToolTip(f)
+            self.list_widget.addItem(item)
+
+        self.progress.setValue(0)
+        self.progress.setMaximum(max(0, len(self.files)))
+        self.current_index = 0
+        self._set_status(f"Found {len(self.files)} .mb file(s).")
+        if self.files:
+            self._log(f"Scanned: {folder}\n - " + "\n - ".join(self.files))
+
+    def _start(self):
+        if self.running:
+            return
+
+        # Respect user selection if any
+        selected = self.list_widget.selectedItems()
+        if selected:
+            selected_set = set([s.text() for s in selected])
+            folder = normalize_path(self.folder_edit.text().strip())
+            chosen = []
+            for i in range(self.list_widget.count()):
+                it = self.list_widget.item(i)
+                if it.text() in selected_set:
+                    chosen.append(os.path.join(folder, it.text()))
+            self.files = chosen
+
+        if not self.files:
+            self._set_status("No .mb files to import.")
+            return
+
+        self.running = True
+        self.paused = False
+        self.busy = False
+        self.current_index = 0
+        self.pause_btn.setEnabled(True)
+        self.pause_btn.setText("Pause")
+        self.stop_btn.setEnabled(True)
+        self.start_btn.setEnabled(False)
+        self.started_ms = QtCore.QTime.currentTime().msecsSinceStartOfDay()
+        self._set_status("Running…")
+        self._log(f"Starting import of {len(self.files)} file(s).")
+        self.timer.start()
+
+    def _toggle_pause(self):
+        if not self.running:
+            return
+        self.paused = not self.paused
+        self.pause_btn.setText("Resume" if self.paused else "Pause")
+        self._set_status("Paused." if self.paused else "Running…")
+
+    def _stop(self):
+        if not self.running:
+            return
+        self.running = False
+        self.paused = False
+        self.busy = False
+        self.timer.stop()
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(True)
+        self._set_status("Stopped.")
+        self._log("Stopped by user.")
+
+    def closeEvent(self, event):
+        try:
+            self.timer.stop()
+        except Exception:
+            pass
+        super(BatchMBImporter, self).closeEvent(event)
+
+    # ---------- Core Loop ----------
+    def _tick(self):
+        if not self.running or self.paused or self.busy:
+            return
+
+        if self.current_index >= len(self.files):
+            self._finish()
+            return
+
+        fpath = self.files[self.current_index]
+        self.busy = True
+        self._set_status(f"Importing ({self.current_index+1}/{len(self.files)}): {os.path.basename(fpath)}")
+        self._highlight_current()
+
+        def _do_import():
+            try:
+                self._import_one(fpath)
+                self._log(f"Imported: {fpath}")
+            except Exception as e:
+                self._log_error(f"Error importing {fpath}\n{e}\n{traceback.format_exc()}")
+                if not self.skip_errors_chk.isChecked():
+                    self._stop()
+                    return
+            finally:
+                self.current_index += 1
+                self.progress.setValue(self.current_index)
+                # ETA
+                elapsed = QtCore.QTime.currentTime().msecsSinceStartOfDay() - self.started_ms
+                done = max(1, self.current_index)
+                total = max(1, len(self.files))
+                avg_per = float(elapsed) / float(done)
+                remaining_ms = int(avg_per * (total - done))
+                if self.running:
+                    self._set_status(f"Running… ({self.current_index}/{len(self.files)})  ETA ~ {nice_time(remaining_ms)}")
+                self.busy = False
+
+        mutils.executeDeferred(_do_import)
+
+    def _finish(self):
+        self.running = False
+        self.timer.stop()
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(True)
+        self._set_status("Done.")
+        self._log("All files processed.")
+
+    # ---------- Import Routine ----------
+    def _import_one(self, fpath):
+        fpath = normalize_path(fpath)
+        if not os.path.isfile(fpath):
+            raise IOError("File does not exist: " + fpath)
+
+        # New scene per file (if requested)
+        if self.new_scene_chk.isChecked():
+            cmds.file(new=True, force=True)
+
+        # Snapshot BEFORE import (top-level transforms/assemblies)
+        pre_assemblies = set(cmds.ls(assemblies=True, long=True) or [])
+
+        if self.undo_chunk_chk.isChecked():
+            cmds.undoInfo(openChunk=True, chunkName="BatchMBImporter")
+
+        try:
+            # Import .mb with NO namespace prefixes (merge on clash into root namespace)
+            # This keeps original node names; Maya will only suffix if exact-name conflicts occur.
+            cmds.file(
+                fpath,
+                i=True,
+                type="mayaBinary",
+                ignoreVersion=True,
+                mergeNamespacesOnClash=True,
+                namespace=":"
+            )
+
+            # Identify new imported top-level nodes
+            post_assemblies = set(cmds.ls(assemblies=True, long=True) or [])
+            new_roots = list(post_assemblies - pre_assemblies)
+
+            # Optional: group under <basename>_GRP
+            if self.group_under_null_chk.isChecked() and new_roots:
+                base = os.path.splitext(os.path.basename(fpath))[0]
+                grp_name = self._unique_leaf(self._sanitize_maya_name(base) + "_GRP")
+                try:
+                    grp = cmds.group(new_roots, name=grp_name, world=True)
+                except Exception:
+                    # fallback: only those that still exist
+                    existing = [n for n in new_roots if cmds.objExists(n)]
+                    grp = cmds.group(existing, name=grp_name, world=True) if existing else None
+                if grp and self.center_pivot_chk.isChecked():
+                    try:
+                        cmds.xform(grp, centerPivots=True)
+                    except Exception:
+                        pass
+                if grp:
+                    cmds.select(grp, r=True)
+            else:
+                # Select new roots for visibility, if any
+                if new_roots:
+                    cmds.select(new_roots, r=True)
+
+        finally:
+            if self.undo_chunk_chk.isChecked():
+                cmds.undoInfo(closeChunk=True)
+
+    # ---------- Helpers ----------
+    def _set_status(self, text):
+        self.status_lbl.setText(text)
+
+    def _log(self, text):
+        self.log.appendPlainText(text)
+
+    def _log_error(self, text):
+        self.log.appendPlainText("ERROR: " + text)
+
+    def _highlight_current(self):
+        try:
+            self.list_widget.blockSignals(True)
+            self.list_widget.clearSelection()
+            self.list_widget.blockSignals(False)
+            base = os.path.basename(self.files[self.current_index])
+            for i in range(self.list_widget.count()):
+                it = self.list_widget.item(i)
+                if it.text() == base:
+                    it.setSelected(True)
+                    self.list_widget.scrollToItem(it, QtWidgets.QAbstractItemView.PositionAtCenter)
+                    break
+        except Exception:
+            pass
+
+# ---- Launcher ----
+def show_batch_mb_importer():
+    for w in QtWidgets.QApplication.topLevelWidgets():
+        if isinstance(w, BatchMBImporter):
+            try:
+                w.raise_()
+                w.activateWindow()
+                return w
+            except Exception:
+                pass
+    dlg = BatchMBImporter(parent=_get_maya_main_window())
+    dlg.show()
+    return dlg
+
+def _get_maya_main_window():
+    try:
+        import maya.OpenMayaUI as omui
+        ptr = omui.MQtUtil.mainWindow()
+        if ptr and wrapInstance:
+            return wrapInstance(int(ptr), QtWidgets.QWidget)
+    except Exception:
+        pass
+    return None
+
+# Run
+if __name__ == "__main__":
+    show_batch_mb_importer()
