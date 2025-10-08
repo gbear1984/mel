@@ -1,0 +1,937 @@
+# Batch FBX Importer — Checkpoints + Resume + Optimize Scene + GEO-only + Viewport Toggle
+# Renames each import to <FBXbasename>_GEO; optional material dedupe; Pause/Resume
+# Maya 2018–2025 (PySide2)
+
+from __future__ import annotations
+import os
+import re
+import math
+import json
+import hashlib
+import traceback
+
+from maya import cmds, mel
+import maya.utils as mutils
+
+# ---- Qt setup ----
+try:
+    from PySide2 import QtWidgets, QtCore, QtGui
+    from shiboken2 import wrapInstance
+except ImportError:
+    from PySide import QtGui as QtWidgets
+    from PySide import QtCore, QtGui
+    wrapInstance = None
+
+# ---- Utils ----
+def ensure_fbx_plugin_loaded():
+    """Make sure the FBX plugin is available and the MEL commands exist."""
+    try:
+        if not cmds.pluginInfo('fbxmaya', q=True, loaded=True):
+            cmds.loadPlugin('fbxmaya')
+    except Exception:
+        try:
+            cmds.loadPlugin('fbxmaya.mll')
+        except Exception as e:
+            raise RuntimeError("FBX plugin (fbxmaya) could not be loaded. Enable it in Plug-in Manager.") from e
+    if not mel.eval('exists "FBXImport"'):
+        raise RuntimeError("FBX MEL commands are unavailable even after loading the plugin.")
+
+def normalize_path(p):
+    return os.path.normpath(os.path.expanduser(p))
+
+def nice_time(ms):
+    s = int(ms / 1000.0)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m {s}s"
+
+def _mel_safe(cmd: str):
+    """Run a MEL command; swallow errors (no red spam)."""
+    try:
+        mel.eval(cmd)
+        return True
+    except Exception:
+        return False
+
+def _mel_exists(proc: str) -> bool:
+    """Return True if a MEL procedure/command exists."""
+    try:
+        return bool(mel.eval(f'exists "{proc}"'))
+    except Exception:
+        return False
+
+# ---- Main UI Dialog ----
+class BatchFBXImporter(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super(BatchFBXImporter, self).__init__(parent)
+        self.setWindowTitle("Batch FBX Importer (Checkpoints / Resume / Optimize / GEO-only / Viewport)")
+        self.setMinimumWidth(860)
+
+        # State
+        self.files = []
+        self.current_index = 0
+        self.running = False
+        self.paused = False
+        self.busy = False
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(150)
+        self.timer.timeout.connect(self._tick)
+        self.started_ms = 0
+
+        # Checkpoint/Resume state
+        self.checkpoint_dir = ""
+        self.meta_path = ""
+        self.checkpoint_every = 500
+        self.batch_total = 0
+        self.batch_pad = 1
+        self.batch_index = 0          # number of .mb files saved so far
+        self.last_saved_index = 0     # index of file last included in a save
+        self.base_folder_for_save = ""
+        self.filelist_sig = ""
+
+        # Widgets
+        self.folder_edit = QtWidgets.QLineEdit()
+        self.browse_btn = QtWidgets.QPushButton("Browse…")
+        self.scan_btn = QtWidgets.QPushButton("Scan")
+        self.list_widget = QtWidgets.QListWidget()
+        self.list_widget.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.start_btn = QtWidgets.QPushButton("Start")
+        self.pause_btn = QtWidgets.QPushButton("Pause")
+        self.stop_btn = QtWidgets.QPushButton("Stop")
+        self.close_btn = QtWidgets.QPushButton("Close")
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+
+        self.progress = QtWidgets.QProgressBar()
+        self.status_lbl = QtWidgets.QLabel("Idle.")
+        self.status_lbl.setWordWrap(True)
+
+        # Options
+        self.new_scene_chk = QtWidgets.QCheckBox("New scene per file")
+        self.new_scene_chk.setChecked(False)
+
+        self.group_under_null_chk = QtWidgets.QCheckBox('Group imported node under "FBX_Import"')
+        self.group_under_null_chk.setChecked(True)
+
+        self.center_pivot_chk = QtWidgets.QCheckBox("Center pivots after import")
+        self.center_pivot_chk.setChecked(False)
+
+        self.undo_chunk_chk = QtWidgets.QCheckBox("Wrap each import in an undo chunk")
+        self.undo_chunk_chk.setChecked(True)
+
+        self.skip_errors_chk = QtWidgets.QCheckBox("Skip files that error (continue batch)")
+        self.skip_errors_chk.setChecked(True)
+
+        self.dedupe_materials_chk = QtWidgets.QCheckBox("Deduplicate materials on import")
+        self.dedupe_materials_chk.setChecked(True)
+
+        self.geo_only_chk = QtWidgets.QCheckBox("Attempt GEO-only import (skip materials/anim/etc.)")
+        self.geo_only_chk.setChecked(True)
+
+        self.disable_log_chk = QtWidgets.QCheckBox("Disable FBX logging")
+        self.disable_log_chk.setChecked(True)
+
+        # Viewport toggle
+        self.viewport_btn = QtWidgets.QPushButton("Viewport: ON")
+        self.viewport_btn.setCheckable(True)
+        self.viewport_btn.setChecked(False)  # unchecked = viewport ON
+        self.viewport_btn.clicked.connect(self._toggle_viewport_clicked)
+
+        # Checkpoint controls
+        self.checkpoint_chk = QtWidgets.QCheckBox("Save .mb checkpoints during batch")
+        self.checkpoint_chk.setChecked(True)
+
+        self.every_lbl = QtWidgets.QLabel("Every")
+        self.every_spin = QtWidgets.QSpinBox()
+        self.every_spin.setRange(10, 100000)
+        self.every_spin.setSingleStep(10)
+        self.every_spin.setValue(500)
+        self.every_suffix = QtWidgets.QLabel("files")
+
+        # Optimize before checkpoint
+        self.optimize_scene_chk = QtWidgets.QCheckBox("Optimize scene before each checkpoint (kill empty nodes)")
+        self.optimize_scene_chk.setChecked(True)
+
+        # Resume toggle
+        self.resume_chk = QtWidgets.QCheckBox("Resume from last checkpoint if available")
+        self.resume_chk.setChecked(True)
+
+        # Log
+        self.log = QtWidgets.QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setPlaceholderText("Log…")
+
+        # Layout
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(QtWidgets.QLabel("Folder:"))
+        top.addWidget(self.folder_edit, 1)
+        top.addWidget(self.browse_btn)
+        top.addWidget(self.scan_btn)
+
+        opts_layout = QtWidgets.QGridLayout()
+        opts_layout.addWidget(self.new_scene_chk,        0, 0)
+        opts_layout.addWidget(self.group_under_null_chk, 0, 1)
+        opts_layout.addWidget(self.center_pivot_chk,     0, 2)
+        opts_layout.addWidget(self.undo_chunk_chk,       1, 0)
+        opts_layout.addWidget(self.skip_errors_chk,      1, 1)
+        opts_layout.addWidget(self.dedupe_materials_chk, 1, 2)
+        opts_layout.addWidget(self.geo_only_chk,         2, 0)
+        opts_layout.addWidget(self.disable_log_chk,      2, 1)
+        opts_layout.addWidget(self.viewport_btn,         2, 2)
+
+        # Checkpoint row (with optimize & resume)
+        cp_layout = QtWidgets.QHBoxLayout()
+        cp_layout.addWidget(self.checkpoint_chk)
+        cp_layout.addStretch(1)
+        cp_layout.addWidget(self.every_lbl)
+        cp_layout.addWidget(self.every_spin)
+        cp_layout.addWidget(self.every_suffix)
+        cp_layout.addStretch(1)
+        cp_layout.addWidget(self.optimize_scene_chk)
+        cp_layout.addStretch(1)
+        cp_layout.addWidget(self.resume_chk)
+
+        btns = QtWidgets.QHBoxLayout()
+        btns.addWidget(self.start_btn)
+        btns.addWidget(self.pause_btn)
+        btns.addWidget(self.stop_btn)
+        btns.addStretch(1)
+        btns.addWidget(self.close_btn)
+
+        v = QtWidgets.QVBoxLayout(self)
+        v.addLayout(top)
+        v.addLayout(opts_layout)
+        v.addLayout(cp_layout)
+        v.addWidget(self.list_widget, 2)
+        v.addWidget(self.progress)
+        v.addWidget(self.status_lbl)
+        v.addWidget(self.log, 1)
+        v.addLayout(btns)
+
+        # Signals
+        self.browse_btn.clicked.connect(self._choose_folder)
+        self.scan_btn.clicked.connect(self._scan_folder)
+        self.start_btn.clicked.connect(self._start)
+        self.pause_btn.clicked.connect(self._toggle_pause)
+        self.stop_btn.clicked.connect(self._stop)
+        self.close_btn.clicked.connect(self.close)
+
+        self._last_folder = ""
+
+    # ---------- Viewport toggle ----------
+    def _toggle_viewport_clicked(self, checked):
+        # checked == True means "Viewport OFF"
+        try:
+            cmds.refresh(suspend=checked)
+            if checked:
+                self.viewport_btn.setText("Viewport: OFF")
+                self._log("[Viewport] Suspended viewport refresh.")
+            else:
+                self.viewport_btn.setText("Viewport: ON")
+                cmds.refresh(force=True)
+                self._log("[Viewport] Resumed viewport refresh.")
+        except Exception as e:
+            self._log(f"[Viewport] Error: {e}")
+
+    # ---------- FBX import options (guarded; no missing-proc spam) ----------
+    def _apply_fbx_import_options(self):
+        if _mel_exists('FBXResetImport'):
+            _mel_safe('FBXResetImport;')
+        if _mel_exists('FBXImportMode'):
+            _mel_safe('FBXImportMode -v "add";')
+        if _mel_exists('FBXImportMergeBackNullPivots'):
+            _mel_safe('FBXImportMergeBackNullPivots -v true;')
+        if _mel_exists('FBXImportGenerateLog'):
+            gen_log = "false" if self.disable_log_chk.isChecked() else "true"
+            _mel_safe(f'FBXImportGenerateLog -v {gen_log};')
+
+        if self.geo_only_chk.isChecked():
+            legacy_flags = [
+                'FBXImportMaterials',
+                'FBXImportEmbeddedTextures',
+                'FBXImportCameras',
+                'FBXImportLights',
+                'FBXImportAnimation',
+                'FBXImportSkins',
+                'FBXImportShapes',
+                'FBXImportConstraints',
+                'FBXImportCacheFile',
+                'FBXImportProtectDrivenKeys',
+                'FBXImportInputConnections',
+            ]
+            applied = 0
+            for flag in legacy_flags:
+                if _mel_exists(flag):
+                    if _mel_safe(f'{flag} -v false;'):
+                        applied += 1
+            if applied == 0:
+                self._log("[FBX] Plugin doesn’t expose scriptable GEO-only flags; "
+                          "import behavior follows whatever is set in the FBX Import UI.")
+
+    # ---------- Material Dedupe Helpers ----------
+    def _list_surface_shaders(self):
+        shader_types = ["aiStandardSurface", "standardSurface", "lambert", "phong", "blinn", "surfaceShader"]
+        found = []
+        for t in shader_types:
+            found.extend(cmds.ls(type=t) or [])
+        return sorted(set(found))
+
+    def _get_attr_safe(self, node, attr):
+        plug = f"{node}.{attr}"
+        if not cmds.attributeQuery(attr, node=node, exists=True):
+            return None
+        try:
+            val = cmds.getAttr(plug)
+        except Exception:
+            return None
+        if isinstance(val, (list, tuple)) and len(val) == 1 and isinstance(val[0], (list, tuple)):
+            return tuple(val[0])
+        if isinstance(val, (list, tuple)):
+            try:
+                return tuple(val)
+            except Exception:
+                return val
+        return val
+
+    def _find_upstream_texture_path(self, node, attr_name_candidates):
+        def file_path_from_node(n):
+            if cmds.nodeType(n) == "file" and cmds.attributeQuery("fileTextureName", node=n, exists=True):
+                try:
+                    return cmds.getAttr(f"{n}.fileTextureName") or ""
+                except Exception:
+                    return ""
+            if cmds.nodeType(n) == "aiImage" and cmds.attributeQuery("filename", node=n, exists=True):
+                try:
+                    return cmds.getAttr(f"{n}.filename") or ""
+                except Exception:
+                    return ""
+            return ""
+        for a in attr_name_candidates:
+            if not cmds.attributeQuery(a, node=node, exists=True):
+                continue
+            src = cmds.listConnections(f"{node}.{a}", s=True, d=False, plugs=True) or []
+            if not src:
+                continue
+            src_node = src[0].split(".")[0]
+            p = file_path_from_node(src_node)
+            if p:
+                try:
+                    return os.path.normpath(p).replace("\\", "/")
+                except Exception:
+                    return p
+        return ""
+
+    def _fingerprint_material(self, mat):
+        t = cmds.nodeType(mat)
+
+        def num(val):
+            if isinstance(val, (list, tuple)):
+                return tuple(round(float(x), 6) for x in val)
+            try:
+                return round(float(val), 6)
+            except Exception:
+                return val
+
+        color_tex = ""
+        if t in ("aiStandardSurface", "standardSurface"):
+            color_tex = self._find_upstream_texture_path(mat, ["baseColor", "base_color", "color"])
+        elif t in ("lambert", "phong", "blinn", "surfaceShader"):
+            color_tex = self._find_upstream_texture_path(mat, ["color", "outColor", "ambientColor"])
+
+        if t == "aiStandardSurface":
+            fp = {
+                "type": t,
+                "base": num(self._get_attr_safe(mat, "base")),
+                "baseColor": num(self._get_attr_safe(mat, "baseColor")),
+                "specular": num(self._get_attr_safe(mat, "specular")),
+                "metalness": num(self._get_attr_safe(mat, "metalness")),
+                "roughness": num(self._get_attr_safe(mat, "specularRoughness")),
+                "transmission": num(self._get_attr_safe(mat, "transmission")),
+                "ior": num(self._get_attr_safe(mat, "specularIOR")),
+                "emission": num(self._get_attr_safe(mat, "emission")),
+                "emissionColor": num(self._get_attr_safe(mat, "emissionColor")),
+                "colorTex": color_tex,
+            }
+        elif t == "standardSurface":
+            fp = {
+                "type": t,
+                "base": num(self._get_attr_safe(mat, "base")),
+                "baseColor": num(self._get_attr_safe(mat, "baseColor")),
+                "specular": num(self._get_attr_safe(mat, "specular")),
+                "metalness": num(self._get_attr_safe(mat, "metalness")),
+                "roughness": num(self._get_attr_safe(mat, "roughness")),
+                "transmission": num(self._get_attr_safe(mat, "transmission")),
+                "ior": num(self._get_attr_safe(mat, "ior")),
+                "emission": num(self._get_attr_safe(mat, "emission")),
+                "emissionColor": num(self._get_attr_safe(mat, "emissionColor")),
+                "colorTex": color_tex,
+            }
+        elif t in ("lambert", "phong", "blinn"):
+            fp = {
+                "type": t,
+                "color": num(self._get_attr_safe(mat, "color")),
+                "transparency": num(self._get_attr_safe(mat, "transparency")),
+                "diffuse": num(self._get_attr_safe(mat, "diffuse")) if t == "lambert" else None,
+                "specularColor": num(self._get_attr_safe(mat, "specularColor")) if t in ("phong", "blinn") else None,
+                "eccentricity": num(self._get_attr_safe(mat, "eccentricity")) if t == "phong" else None,
+                "colorTex": color_tex,
+            }
+        elif t == "surfaceShader":
+            fp = {
+                "type": t,
+                "outColor": num(self._get_attr_safe(mat, "outColor")),
+                "colorTex": color_tex,
+            }
+        else:
+            fp = {"type": t}
+        return tuple(sorted(fp.items()))
+
+    def _build_fingerprint_db(self, mats):
+        db = {}
+        for m in mats:
+            sgs = cmds.listConnections(m, type="shadingEngine") or []
+            sgs = [s for s in sgs if s not in ("initialShadingGroup", "initialParticleSE")]
+            sg = sgs[0] if sgs else "initialShadingGroup"
+            db[self._fingerprint_material(m)] = (m, sg)
+        return db
+
+    def _safe_delete_if_unused(self, nodes):
+        for n in nodes:
+            try:
+                if not cmds.objExists(n):
+                    continue
+                has_inout = (
+                    cmds.listConnections(n, s=True, d=True) or
+                    cmds.listConnections(n, s=True, d=False) or
+                    cmds.listConnections(n, s=False, d=True)
+                )
+                if not has_inout:
+                    cmds.delete(n)
+            except Exception:
+                pass
+
+    def _reassign_sg_members(self, src_sg, dst_sg):
+        if not (src_sg and dst_sg and cmds.objExists(src_sg) and cmds.objExists(dst_sg)):
+            return
+        members = cmds.sets(src_sg, q=True) or []
+        if not members:
+            return
+        for m in members:
+            try:
+                cmds.sets(m, e=True, forceElement=dst_sg)
+            except Exception:
+                try:
+                    cmds.sets(m, e=True, fe=dst_sg)
+                except Exception:
+                    pass
+
+    def _dedupe_new_materials(self, pre_import_mats):
+        if not self.dedupe_materials_chk.isChecked():
+            return
+        db = self._build_fingerprint_db(pre_import_mats)
+        post_mats = self._list_surface_shaders()
+        new_mats = sorted(set(post_mats) - set(pre_import_mats))
+        deduped = 0
+        for nm in new_mats:
+            fp = self._fingerprint_material(nm)
+            if fp in db:
+                old_mat, old_sg = db[fp]
+                sgs = cmds.listConnections(nm, type="shadingEngine") or []
+                sgs = [s for s in sgs if s not in ("initialShadingGroup", "initialParticleSE")]
+                new_sg = sgs[0] if sgs else None
+                self._reassign_sg_members(new_sg, old_sg)
+                # cleanup upstream textures if orphaned
+                upstream = []
+                for a in ("baseColor", "base_color", "color", "ambientColor", "outColor"):
+                    try:
+                        if cmds.attributeQuery(a, node=nm, exists=True):
+                            plugs = cmds.listConnections(f"{nm}.{a}", s=True, d=False, plugs=True) or []
+                            upstream.extend([p.split(".")[0] for p in plugs])
+                    except Exception:
+                        pass
+                try:
+                    if new_sg and new_sg != old_sg and cmds.objExists(new_sg):
+                        if not (cmds.sets(new_sg, q=True) or []):
+                            cmds.delete(new_sg)
+                except Exception:
+                    pass
+                try:
+                    if cmds.objExists(nm):
+                        has_conn = (
+                            cmds.listConnections(nm, s=True, d=True) or
+                            cmds.listConnections(nm, s=False, d=True) or
+                            cmds.listConnections(nm, s=True, d=False)
+                        )
+                        if not has_conn:
+                            cmds.delete(nm)
+                except Exception:
+                    pass
+                self._safe_delete_if_unused(upstream)
+                deduped += 1
+        if deduped:
+            self._log(f"[Dedupe] Reused {deduped} material(s); removed duplicates.")
+
+    # ---------- Filename-based single-geo renaming ----------
+    def _sanitize_maya_name(self, base):
+        s = re.sub(r'[^A-Za-z0-9_]', '_', base)
+        if not s or not re.match(r'^[A-Za-z_]', s):
+            s = f"G_{s}"
+        return s
+
+    def _unique_leaf(self, name):
+        if not cmds.objExists(name):
+            return name
+        i = 2
+        while cmds.objExists(f"{name}_{i}"):
+            i += 1
+        return f"{name}_{i}"
+
+    def _rename_new_single_geo_from_filename(self, fpath, pre_meshes):
+        post_meshes = set(cmds.ls(type="mesh", long=True) or [])
+        new_meshes = list(post_meshes - set(pre_meshes))
+        if not new_meshes:
+            self._log("[Rename] No new mesh found after import.")
+            return ""
+        mesh = new_meshes[0]
+        parent = (cmds.listRelatives(mesh, parent=True, fullPath=False) or [None])[0]
+        if not parent:
+            self._log(f"[Rename] New mesh {mesh} has no parent transform?")
+            return ""
+        base = os.path.splitext(os.path.basename(fpath))[0]
+        safe = self._sanitize_maya_name(base) + "_GEO"
+        target = self._unique_leaf(safe)
+        try:
+            new_name = cmds.rename(parent, target)
+            cmds.select(new_name, r=True)
+            return new_name
+        except Exception as e:
+            self._log(f"[Rename] Could not rename {parent} → {target}: {e}")
+            return ""
+
+    # ---------- Optimize before checkpoint ----------
+    def _optimize_scene_size(self):
+        """Run Maya's optimizeSceneSize -all (if available) to clean empty nodes, etc."""
+        if not self.optimize_scene_chk.isChecked():
+            return
+        try:
+            if _mel_exists('optimizeSceneSize'):
+                self._log("[Optimize] optimizeSceneSize -all …")
+                _mel_safe('optimizeSceneSize -all;')
+                self._log("[Optimize] Done.")
+            else:
+                self._log("[Optimize] Skipped: 'optimizeSceneSize' MEL command not available.")
+        except Exception as e:
+            self._log(f"[Optimize] Error: {e}")
+
+    # ---------- Checkpoint / Resume helpers ----------
+    def _compute_filelist_signature(self):
+        # Signature of the job: stable order of basenames only (folder may move)
+        joined = "\n".join([os.path.basename(p) for p in self.files]).encode("utf-8", errors="ignore")
+        return hashlib.md5(joined).hexdigest()
+
+    def _setup_checkpoints(self):
+        self.checkpoint_every = int(self.every_spin.value())
+        self.base_folder_for_save = normalize_path(self.folder_edit.text().strip())
+        self.checkpoint_dir = os.path.join(self.base_folder_for_save, "batchedMBs")
+        self.meta_path = os.path.join(self.checkpoint_dir, "fbxBatch_progress.json")
+        try:
+            if not os.path.isdir(self.checkpoint_dir):
+                os.makedirs(self.checkpoint_dir)
+        except Exception as e:
+            self._log(f"[Checkpoint] Could not create folder: {self.checkpoint_dir}\n{e}")
+
+        total = max(0, len(self.files))
+        self.batch_total = int(math.ceil(float(total) / float(max(1, self.checkpoint_every))))
+        self.batch_pad = max(2, len(str(max(1, self.batch_total))))
+        self.batch_index = 0
+        self.last_saved_index = 0
+        self.filelist_sig = self._compute_filelist_signature()
+
+        self._log(f"[Checkpoint] Will save {self.batch_total} file(s) in {self.checkpoint_dir} "
+                  f"(every {self.checkpoint_every} files).")
+        if self.checkpoint_chk.isChecked() and self.new_scene_chk.isChecked():
+            self._log("[Checkpoint] Note: Ignoring 'New scene per file' because checkpointing is enabled.")
+
+        if self.resume_chk.isChecked():
+            self._try_resume_from_meta()
+
+    def _try_resume_from_meta(self):
+        if not os.path.isfile(self.meta_path):
+            self._log("[Resume] No prior checkpoint info found.")
+            return
+        try:
+            with open(self.meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            self._log(f"[Resume] Failed to read meta file: {e}")
+            return
+
+        if meta.get("filelist_sig") != self.filelist_sig:
+            self._log("[Resume] Job signature changed (different file list). Starting from beginning.")
+            return
+
+        next_index = int(meta.get("next_index", 0))
+        batches_saved = int(meta.get("batches_saved", 0))
+        last_saved = int(meta.get("last_saved_index", 0))
+        prior_every = int(meta.get("checkpoint_every", self.checkpoint_every))
+
+        # If user changed the interval, we still resume from next_index, but recompute totals for new interval.
+        if prior_every != self.checkpoint_every:
+            self._log(f"[Resume] Checkpoint interval changed ({prior_every} → {self.checkpoint_every}). "
+                      "Resuming from saved index with new interval.")
+
+        # Apply resume cursor
+        self.current_index = min(max(0, next_index), len(self.files))
+        self.batch_index = max(0, batches_saved)
+        self.last_saved_index = max(0, last_saved)
+
+        # Update totals and pad (in case interval changed)
+        total = max(0, len(self.files))
+        self.batch_total = int(math.ceil(float(total) / float(max(1, self.checkpoint_every))))
+        self.batch_pad = max(2, len(str(max(1, self.batch_total))))
+
+        # Set progress bar and log
+        self.progress.setMaximum(max(0, len(self.files)))
+        self.progress.setValue(self.current_index)
+        self._log(f"[Resume] Continuing at file {self.current_index+1}/{len(self.files)} "
+                  f"(batches saved so far: {self.batch_index}).")
+        # Fresh scene to start the new accumulation window
+        try:
+            cmds.file(new=True, force=True)
+        except Exception:
+            pass
+
+    def _write_progress_meta(self, completed=False):
+        meta = {
+            "checkpoint_every": self.checkpoint_every,
+            "batches_saved": self.batch_index,
+            "last_saved_index": self.last_saved_index,
+            "next_index": self.current_index,
+            "total_files": len(self.files),
+            "filelist_sig": self.filelist_sig,
+            "completed": bool(completed),
+        }
+        try:
+            with open(self.meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except Exception as e:
+            self._log(f"[Checkpoint] Failed to write meta: {e}")
+
+    def _checkpoint_filename(self, next_index=False):
+        idx = self.batch_index + (1 if next_index else 0)
+        idx = max(1, idx)
+        total = max(1, self.batch_total)
+        left = str(idx).zfill(self.batch_pad)
+        right = str(total).zfill(self.batch_pad)
+        return os.path.join(self.checkpoint_dir, f"fbxBatch_{left}_{right}.mb")
+
+    def _save_checkpoint_and_new_scene(self, reason="interval"):
+        # Increment batch counter and compute target path
+        self.batch_index += 1
+        target = self._checkpoint_filename(next_index=False)
+
+        # Optimize before writing the .mb
+        self._optimize_scene_size()
+
+        try:
+            cmds.file(rename=target)
+            cmds.file(save=True, type='mayaBinary')
+            self._log(f"[Checkpoint] Saved: {target} (reason: {reason})")
+        except Exception as e:
+            self._log(f"[Checkpoint] Save failed: {target}\n{e}")
+
+        # Start a fresh scene
+        try:
+            cmds.file(new=True, force=True)
+        except Exception as e:
+            self._log(f"[Checkpoint] New scene failed: {e}")
+
+        # Update last saved index to current, and persist meta
+        self.last_saved_index = self.current_index
+        self._write_progress_meta(completed=False)
+
+    def _maybe_checkpoint(self, finishing=False):
+        if not self.checkpoint_chk.isChecked():
+            return
+        processed_since = self.current_index - self.last_saved_index
+        if (not finishing and processed_since >= self.checkpoint_every) or (finishing and processed_since > 0):
+            reason = "finish" if finishing else "interval"
+            self._save_checkpoint_and_new_scene(reason=reason)
+
+    # ---------- UI Actions ----------
+    def _choose_folder(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose Folder Containing FBX Files")
+        if folder:
+            self.folder_edit.setText(folder)
+            self._scan_folder()
+
+    def _scan_folder(self):
+        folder = normalize_path(self.folder_edit.text().strip())
+        self.list_widget.clear()
+        self.files = []
+        if not folder or not os.path.isdir(folder):
+            self._log(f"Folder not found: {folder}")
+            self._set_status("Folder not found.")
+            return
+
+        all_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(".fbx")]
+        self.files = sorted(all_files, key=lambda p: p.lower())
+        for f in self.files:
+            item = QtWidgets.QListWidgetItem(os.path.basename(f))
+            item.setToolTip(f)
+            self.list_widget.addItem(item)
+
+        self.progress.setValue(0)
+        self.progress.setMaximum(max(0, len(self.files)))
+        self.current_index = 0
+        self._set_status(f"Found {len(self.files)} FBX file(s).")
+        if self.files:
+            self._log(f"Scanned: {folder}\n - " + "\n - ".join(self.files))
+
+    def _start(self):
+        if self.running:
+            return
+        try:
+            ensure_fbx_plugin_loaded()
+        except Exception as e:
+            self._log_error(str(e))
+            self._set_status("Unable to start; FBX plugin missing.")
+            return
+
+        selected = self.list_widget.selectedItems()
+        if selected:
+            selected_set = set([s.text() for s in selected])
+            folder = normalize_path(self.folder_edit.text().strip())
+            chosen = []
+            for i in range(self.list_widget.count()):
+                it = self.list_widget.item(i)
+                if it.text() in selected_set:
+                    chosen.append(os.path.join(folder, it.text()))
+            self.files = chosen
+
+        if not self.files:
+            self._set_status("No FBX files to import.")
+            return
+
+        # Setup checkpoints (+ maybe resume)
+        self._setup_checkpoints()
+
+        self.running = True
+        self.paused = False
+        self.busy = False
+        self.pause_btn.setEnabled(True)
+        self.pause_btn.setText("Pause")
+        self.stop_btn.setEnabled(True)
+        self.start_btn.setEnabled(False)
+        self.started_ms = QtCore.QTime.currentTime().msecsSinceStartOfDay()
+        self._set_status("Running…")
+        self._log(f"Starting import of {len(self.files)} file(s) (starting at index {self.current_index}).")
+        self.timer.start()
+
+    def _toggle_pause(self):
+        if not self.running:
+            return
+        self.paused = not self.paused
+        self.pause_btn.setText("Resume" if self.paused else "Pause")
+        self._set_status("Paused." if self.paused else "Running…")
+
+    def _stop(self):
+        if not self.running:
+            return
+        self.running = False
+        self.paused = False
+        self.busy = False
+        self.timer.stop()
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(True)
+        # Save any pending checkpoint on stop and persist meta
+        self._maybe_checkpoint(finishing=True)
+        self._write_progress_meta(completed=False)
+        self._set_status("Stopped.")
+        self._log("Stopped by user.")
+
+    def closeEvent(self, event):
+        try:
+            self.timer.stop()
+        except Exception:
+            pass
+        super(BatchFBXImporter, self).closeEvent(event)
+
+    # ---------- Core Loop ----------
+    def _tick(self):
+        if not self.running or self.paused or self.busy:
+            return
+
+        if self.current_index >= len(self.files):
+            self._finish()
+            return
+
+        fpath = self.files[self.current_index]
+        self.busy = True
+        self._set_status(f"Importing ({self.current_index+1}/{len(self.files)}): {os.path.basename(fpath)}")
+        self._highlight_current()
+
+        def _do_import():
+            try:
+                self._import_one(fpath)
+                self._log(f"Imported: {fpath}")
+            except Exception as e:
+                self._log_error(f"Error importing {fpath}\n{e}\n{traceback.format_exc()}")
+                if not self.skip_errors_chk.isChecked():
+                    self._stop()
+                    return
+            finally:
+                self.current_index += 1
+                self.progress.setValue(self.current_index)
+
+                # Persist progress and maybe checkpoint
+                self._write_progress_meta(completed=False)
+                self._maybe_checkpoint(finishing=False)
+
+                # ETA
+                elapsed = QtCore.QTime.currentTime().msecsSinceStartOfDay() - self.started_ms
+                done = max(1, self.current_index)
+                total = max(1, len(self.files))
+                avg_per = float(elapsed) / float(done)
+                remaining_ms = int(avg_per * (total - done))
+                if self.running:
+                    self._set_status(f"Running… ({self.current_index}/{len(self.files)})  ETA ~ {nice_time(remaining_ms)}")
+                self.busy = False
+
+        mutils.executeDeferred(_do_import)
+
+    def _finish(self):
+        self.running = False
+        self.timer.stop()
+        # Final checkpoint if anything pending
+        self._maybe_checkpoint(finishing=True)
+        self.pause_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(True)
+        self._set_status("Done.")
+        self._log("All files processed.")
+        self._write_progress_meta(completed=True)
+
+    # ---------- Import Routine ----------
+    def _apply_geo_only_note_if_needed(self):
+        if self.geo_only_chk.isChecked():
+            self._log("[FBX] If materials still appear, your FBX build ignores script flags. "
+                      "Checkpointing + optimization will keep scenes lean and fast.")
+
+    def _import_one(self, fpath):
+        fpath = normalize_path(fpath)
+        if not os.path.isfile(fpath):
+            raise IOError("File does not exist: " + fpath)
+
+        # If checkpointing is ON, ignore "new scene per file" until a checkpoint save
+        if self.new_scene_chk.isChecked() and not self.checkpoint_chk.isChecked():
+            cmds.file(new=True, force=True)
+
+        # Snapshot BEFORE import
+        pre_import_mats = self._list_surface_shaders()
+        pre_meshes = cmds.ls(type="mesh", long=True) or []
+
+        if self.undo_chunk_chk.isChecked():
+            cmds.undoInfo(openChunk=True, chunkName="BatchFBXImporter")
+
+        try:
+            # FBX flags
+            self._apply_fbx_import_options()
+            self._apply_geo_only_note_if_needed()
+
+            # Import
+            safe = fpath.replace("\\", "/")
+            _mel_safe(f'FBXImport -f "{safe}";')
+
+            # Rename the NEW (single) piece of geo to <filename>_GEO
+            new_name = self._rename_new_single_geo_from_filename(fpath, pre_meshes)
+            if new_name:
+                self._log(f"[Rename] {os.path.basename(fpath)} → {new_name}")
+            else:
+                self._log(f"[Rename] {os.path.basename(fpath)}: nothing renamed (no new mesh?)")
+
+        finally:
+            if self.undo_chunk_chk.isChecked():
+                cmds.undoInfo(closeChunk=True)
+
+        # Dedupe (no-op if GEO-only prevented materials)
+        try:
+            self._dedupe_new_materials(pre_import_mats)
+        except Exception as _e:
+            self._log(f"[Dedupe] Warning: {str(_e)}")
+
+        # Optional: group/center pivot
+        imported_nodes_after = cmds.ls(sl=True) or []
+        group_name = None
+        if self.group_under_null_chk.isChecked() and imported_nodes_after:
+            try:
+                group_name = cmds.group(imported_nodes_after, name="FBX_Import", world=True)
+            except Exception:
+                existing = [n for n in imported_nodes_after if cmds.objExists(n)]
+                if existing:
+                    group_name = cmds.group(existing, name="FBX_Import", world=True)
+        if self.center_pivot_chk.isChecked():
+            try:
+                target = [group_name] if group_name else imported_nodes_after
+                if target:
+                    cmds.xform(target, centerPivots=True)
+            except Exception:
+                pass
+
+    # ---------- Helpers ----------
+    def _set_status(self, text):
+        self.status_lbl.setText(text)
+
+    def _log(self, text):
+        self.log.appendPlainText(text)
+
+    def _log_error(self, text):
+        self.log.appendPlainText("ERROR: " + text)
+
+    def _highlight_current(self):
+        try:
+            self.list_widget.blockSignals(True)
+            self.list_widget.clearSelection()
+            self.list_widget.blockSignals(False)
+            base = os.path.basename(self.files[self.current_index])
+            for i in range(self.list_widget.count()):
+                it = self.list_widget.item(i)
+                if it.text() == base:
+                    it.setSelected(True)
+                    self.list_widget.scrollToItem(it, QtWidgets.QAbstractItemView.PositionAtCenter)
+                    break
+        except Exception:
+            pass
+
+# ---- Launcher ----
+def show_batch_fbx_importer():
+    for w in QtWidgets.QApplication.topLevelWidgets():
+        if isinstance(w, BatchFBXImporter):
+            try:
+                w.raise_()
+                w.activateWindow()
+                return w
+            except Exception:
+                pass
+    dlg = BatchFBXImporter(parent=_get_maya_main_window())
+    dlg.show()
+    return dlg
+
+def _get_maya_main_window():
+    try:
+        import maya.OpenMayaUI as omui
+        ptr = omui.MQtUtil.mainWindow()
+        if ptr and wrapInstance:
+            return wrapInstance(int(ptr), QtWidgets.QWidget)
+    except Exception:
+        pass
+    return None
+
+# Run
+if __name__ == "__main__":
+    show_batch_fbx_importer()
