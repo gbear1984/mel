@@ -1,0 +1,298 @@
+# se_incremental_controller_scrub.py
+# Maya 2020+ (Python 3)
+# "seIncrementalController" — HOLD-TO-SCRUB version
+#
+# Hold Q/W/E => translate X/Y/Z by mouse motion (screen-space)
+# Hold A/S/D => rotate   X/Y/Z by mouse motion (screen-space)
+# Shift = ×10 sensitivity, Ctrl = ÷10 sensitivity
+# Sign follows mouse direction (left = −, right = +)
+#
+# Tip: tune PIXELS_PER_UNIT / PIXELS_PER_DEG for base feel, and use the UI
+#      step fields as multipliers to make it snappier or gentler.
+
+import maya.cmds as cmds
+from PySide2 import QtCore, QtWidgets, QtGui
+from shiboken2 import wrapInstance
+import maya.OpenMayaUI as omui
+
+WIN = "seIncrementalController_win"
+
+# -------------------- feel / sensitivity (tweak to taste) --------------------
+PIXELS_PER_UNIT = 10.0   # translate: pixels required to move 1.0 * translate_step units
+PIXELS_PER_DEG  = 4.0    # rotate:    pixels required to rotate 1.0 * rotate_step degrees
+
+# ----------------------------- helpers --------------------------------------
+
+def _qt_for_cmds_window(win_name):
+    ptr = omui.MQtUtil.findWindow(win_name)
+    return wrapInstance(int(ptr), QtWidgets.QWidget) if ptr else None
+
+def _active_camera_transform():
+    panel = cmds.getPanel(withFocus=True)
+    if not panel or not cmds.modelPanel(panel, q=True, exists=True):
+        panels = [p for p in cmds.getPanel(type='modelPanel') if cmds.modelPanel(p, q=True, isVisible=True)]
+        panel = panels[0] if panels else None
+    if not panel:
+        return None
+    cam = cmds.modelPanel(panel, q=True, camera=True)
+    if not cam:
+        return None
+    if cmds.nodeType(cam) == 'camera':
+        parents = cmds.listRelatives(cam, p=True, f=False) or []
+        return parents[0] if parents else None
+    return cam
+
+def _targets(use_camera=False):
+    if use_camera:
+        cam_x = _active_camera_transform()
+        return [cam_x] if cam_x and cmds.objExists(cam_x) else []
+    sel = cmds.ls(sl=True) or []
+    out, seen = [], set()
+    for s in sel:
+        t = s if cmds.nodeType(s) == 'transform' else (cmds.listRelatives(s, p=True, f=False) or [None])[0]
+        if t and t not in seen:
+            seen.add(t); out.append(t)
+    return out
+
+def _space_flags(space_mode):  # 'world' | 'object'
+    return dict(ws=True) if space_mode == 'world' else dict(os=True)
+
+def _mode_state():
+    tgt = cmds.radioCollection('se_inc_tgt_group',  q=True, sl=True)
+    spc = cmds.radioCollection('se_inc_space_group', q=True, sl=True)
+    return ('selection' if tgt == 'se_inc_tgt_sel' else 'camera',
+            'world'     if spc == 'se_inc_space_world' else 'object')
+
+def _float_from(field, fallback):
+    try: return float(cmds.textField(field, q=True, text=True))
+    except Exception: return fallback
+
+def _warn(msg): cmds.warning("[seIncrementalController] " + msg)
+
+# ----------------------------- scrub state -----------------------------------
+
+class _ScrubState:
+    def __init__(self):
+        self.active   = False
+        self.mode     = None       # 'translate' | 'rotate'
+        self.axis     = 0          # 0=X,1=Y,2=Z
+        self.last_pos = None       # QPoint
+        self.targets  = []
+        self.space    = {}
+        self.win      = None
+
+_state = _ScrubState()
+_key_filter_ref = None   # prevent GC
+
+# ----------------------------- ops -------------------------------------------
+
+def _apply_translate(delta_amount, axis_idx):
+    """delta_amount is signed units."""
+    if abs(delta_amount) < 1e-12 or not _state.targets:
+        return
+    d = [0.0, 0.0, 0.0]; d[axis_idx] = float(delta_amount)
+    for t in _state.targets:
+        cmds.move(d[0], d[1], d[2], t, r=True, **_state.space)
+
+def _apply_rotate(delta_degrees, axis_idx):
+    """delta_degrees is signed degrees."""
+    if abs(delta_degrees) < 1e-12 or not _state.targets:
+        return
+    d = [0.0, 0.0, 0.0]; d[axis_idx] = float(delta_degrees)
+    for t in _state.targets:
+        cmds.rotate(d[0], d[1], d[2], t, r=True, **_state.space)
+
+# ----------------------------- UI --------------------------------------------
+
+def _build_ui():
+    if cmds.window(WIN, exists=True):
+        cmds.deleteUI(WIN, window=True)
+
+    cmds.window(WIN, title="seIncrementalController", sizeable=False, mnb=False, mxb=False)
+    form = cmds.formLayout(nd=100)
+
+    # Target
+    tgt_row = cmds.rowLayout(nc=4, adj=1)
+    cmds.text(l="Target:", w=70, align='left')
+    cmds.radioCollection('se_inc_tgt_group')
+    cmds.radioButton('se_inc_tgt_sel', l="Selection", sl=True)
+    cmds.radioButton('se_inc_tgt_cam', l="Active Camera")
+    cmds.setParent('..')
+
+    # Space
+    spc_row = cmds.rowLayout(nc=4, adj=1)
+    cmds.text(l="Space:", w=70, align='left')
+    cmds.radioCollection('se_inc_space_group')
+    cmds.radioButton('se_inc_space_world',  l="World",  sl=True)
+    cmds.radioButton('se_inc_space_object', l="Object")
+    cmds.setParent('..')
+
+    # Translate step
+    trans = cmds.frameLayout(label="Translate Step (multiplier)", collapsable=False, mw=6, mh=6)
+    row = cmds.rowLayout(nc=9, adjustableColumn=2)
+    cmds.text(l="Step:", w=70, align='left')
+    cmds.textField('se_inc_step_t', text="0.1", w=90)
+    for v in [0.001, 0.01, 0.1, 1, 10, 50, 100]:
+        cmds.button(l=str(v), w=56, c=lambda _, vv=v: cmds.textField('se_inc_step_t', e=True, text=str(vv)))
+    cmds.setParent('..'); cmds.setParent('..')
+
+    # Rotate step
+    rot = cmds.frameLayout(label="Rotate Step (multiplier, degrees)", collapsable=False, mw=6, mh=6)
+    row = cmds.rowLayout(nc=9, adjustableColumn=2)
+    cmds.text(l="Step:", w=70, align='left')
+    cmds.textField('se_inc_step_r', text="1.0", w=90)
+    for v in [0.1, 0.5, 1, 5, 10, 30, 90]:
+        cmds.button(l=str(v), w=56, c=lambda _, vv=v: cmds.textField('se_inc_step_r', e=True, text=str(vv)))
+    cmds.setParent('..'); cmds.setParent('..')
+
+    # Note
+    note = cmds.frameLayout(label="Hotkeys (hold to scrub)", collapsable=True, collapse=False, mw=6, mh=6)
+    cmds.text(l="Hold Q/W/E → move X/Y/Z   |   Hold A/S/D → rotate X/Y/Z\n"
+                "Mouse left/right = −/+    |   Shift ×10, Ctrl ÷10\n"
+                "Step fields scale sensitivity; sign follows mouse direction.",
+              align='left')
+    cmds.setParent('..')
+
+    cmds.formLayout(form, e=True,
+        attachForm=[(tgt_row,'top',8),(tgt_row,'left',8),(tgt_row,'right',8),
+                    (spc_row,'left',8),(spc_row,'right',8),
+                    (trans,'left',8),(trans,'right',8),
+                    (rot,'left',8),(rot,'right',8),
+                    (note,'left',8),(note,'right',8),(note,'bottom',8)],
+        attachControl=[(spc_row,'top',6,tgt_row),
+                       (trans,'top',10,spc_row),
+                       (rot,'top',8,trans),
+                       (note,'top',8,rot)]
+    )
+
+    cmds.showWindow(WIN)
+    _install_key_filter()
+
+# ----------------------------- event filter -----------------------------------
+
+class _IncKeyMouseFilter(QtCore.QObject):
+    def eventFilter(self, obj, event):
+        # Mouse move while scrubbing
+        if event.type() == QtCore.QEvent.MouseMove and _state.active and _state.last_pos is not None:
+            # Horizontal dominates; use whichever axis has greater magnitude for smoother feel
+            dx = event.pos().x() - _state.last_pos.x()
+            dy = event.pos().y() - _state.last_pos.y()
+            # Pick dominant component; invert Y so upward motion is positive (optional)
+            delta_px = dx if abs(dx) >= abs(dy) else (-dy)
+
+            # Modifiers (Shift ×10, Ctrl ÷10)
+            mods = QtWidgets.QApplication.keyboardModifiers()
+            mult = 1.0
+            if mods & QtCore.Qt.ShiftModifier: mult *= 10.0
+            if mods & QtCore.Qt.ControlModifier: mult /= 10.0
+
+            if _state.mode == 'translate':
+                step = _float_from('se_inc_step_t', 0.1)
+                if step == 0.0: step = 0.0
+                units = (delta_px / max(1e-6, PIXELS_PER_UNIT)) * step * mult
+                if units:
+                    _apply_translate(units, _state.axis)
+            else:  # rotate
+                step = _float_from('se_inc_step_r', 1.0)
+                degrees = (delta_px / max(1e-6, PIXELS_PER_DEG)) * step * mult
+                if degrees:
+                    _apply_rotate(degrees, _state.axis)
+
+            _state.last_pos = event.pos()
+            return True
+
+        # Key press: start scrubbing if Q/W/E/A/S/D
+        if event.type() == QtCore.QEvent.KeyPress and not _state.active:
+            key = event.key()
+            axis_map_t = {QtCore.Qt.Key_Q:0, QtCore.Qt.Key_W:1, QtCore.Qt.Key_E:2}
+            axis_map_r = {QtCore.Qt.Key_A:0, QtCore.Qt.Key_S:1, QtCore.Qt.Key_D:2}
+            mode = None; axis = None
+            if key in axis_map_t:
+                mode, axis = 'translate', axis_map_t[key]
+            elif key in axis_map_r:
+                mode, axis = 'rotate', axis_map_r[key]
+
+            if mode is not None:
+                tgt_mode, spc_mode = _mode_state()
+                targs = _targets(use_camera=(tgt_mode == 'camera'))
+                if not targs:
+                    _warn("No targets (select objects or switch to Active Camera).")
+                    return True  # consume so it doesn't type into fields
+
+                # Setup state
+                _state.active   = True
+                _state.mode     = mode
+                _state.axis     = axis
+                _state.targets  = targs
+                _state.space    = _space_flags(spc_mode)
+                _state.win      = obj if isinstance(obj, QtWidgets.QWidget) else _qt_for_cmds_window(WIN)
+                _state.last_pos = event.pos() if hasattr(event, 'pos') else (_state.win.mapFromGlobal(QtGui.QCursor.pos()) if _state.win else None)
+
+                # Group into one undo chunk
+                chunk = "seIncrementalController_scrub_rotate" if mode == 'rotate' else "seIncrementalController_scrub_translate"
+                cmds.undoInfo(openChunk=True, chunkName=chunk)
+
+                # Grab mouse so we keep receiving moves
+                if _state.win:
+                    _state.win.setCursor(QtCore.Qt.SizeHorCursor)
+                    _state.win.grabMouse()
+
+                return True  # consume
+
+        # Key release: stop scrubbing (only if releasing the same family of keys)
+        if event.type() == QtCore.QEvent.KeyRelease and _state.active:
+            key = event.key()
+            release_ok = False
+            if _state.mode == 'translate' and key in (QtCore.Qt.Key_Q, QtCore.Qt.Key_W, QtCore.Qt.Key_E):
+                release_ok = True
+            if _state.mode == 'rotate'    and key in (QtCore.Qt.Key_A, QtCore.Qt.Key_S, QtCore.Qt.Key_D):
+                release_ok = True
+
+            if release_ok:
+                _end_scrub()
+                return True  # consume
+
+        return False
+
+def _end_scrub():
+    # release mouse and close undo chunk
+    if _state.win:
+        try:
+            _state.win.releaseMouse()
+            _state.win.unsetCursor()
+        except Exception:
+            pass
+    try:
+        cmds.undoInfo(closeChunk=True)
+    except Exception:
+        pass
+    # reset state
+    _state.active   = False
+    _state.mode     = None
+    _state.axis     = 0
+    _state.targets  = []
+    _state.space    = {}
+    _state.last_pos = None
+    _state.win      = None
+
+def _install_key_filter():
+    global _key_filter_ref
+    w = _qt_for_cmds_window(WIN)
+    if not w:
+        return
+    if _key_filter_ref is None:
+        _key_filter_ref = _IncKeyMouseFilter()
+
+    # install on window and all QLineEdits so keystrokes don't get typed in
+    w.installEventFilter(_key_filter_ref)
+    for le in w.findChildren(QtWidgets.QLineEdit):
+        le.installEventFilter(_key_filter_ref)
+
+# --------------------------- entry point --------------------------------------
+
+def seIncrementalController():
+    """Create/raise the seIncrementalController window (hold-to-scrub version)."""
+    _build_ui()
+
+if __name__ == "__main__":
+    seIncrementalController()
