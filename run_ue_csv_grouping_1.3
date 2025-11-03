@@ -1,0 +1,262 @@
+import unreal, csv, os
+from typing import List
+
+# ---------------------- Config ----------------------
+OUTPUT_CSV = r"C:\temp\mesh_transforms_full.csv"  # your path that used to work
+ONLY_SELECTED = False
+INCLUDE_CHILDREN = True
+LOG_EMPTY_STATIC_MESHES = False
+DEBUG = True
+# ----------------------------------------------------
+
+def _log(msg):
+    if DEBUG:
+        unreal.log(f"[XformExport] {msg}")
+
+def _rotator_from_quat(q):
+    try:
+        return q.rotator()
+    except Exception:
+        return unreal.MathLibrary.conv_quat_to_rotator(q)
+
+def _compose(a: unreal.Transform, b: unreal.Transform) -> unreal.Transform:
+    return unreal.MathLibrary.compose_transforms(a, b)
+
+def _as_trs_dict(tf: unreal.Transform, prefix: str):
+    r = _rotator_from_quat(tf.rotation)
+    return {
+        f"{prefix}LocX": tf.translation.x,
+        f"{prefix}LocY": tf.translation.y,
+        f"{prefix}LocZ": tf.translation.z,
+        f"{prefix}Pitch": r.pitch,
+        f"{prefix}Yaw":   r.yaw,
+        f"{prefix}Roll":  r.roll,
+        f"{prefix}ScaleX": tf.scale3d.x,
+        f"{prefix}ScaleY": tf.scale3d.y,
+        f"{prefix}ScaleZ": tf.scale3d.z,
+    }
+
+def _actor_chain(a: unreal.Actor) -> List[str]:
+    out, cur, seen = [], a, set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        out.append(cur.get_name())
+        cur = cur.get_attach_parent_actor()
+    return list(reversed(out))
+
+def _safe_path(obj):
+    try:
+        return obj.get_path_name()
+    except Exception:
+        return ""
+
+def _root_world_transform(actor: unreal.Actor) -> unreal.Transform:
+    rc = None
+    try:
+        rc = actor.get_root_component()
+    except Exception:
+        rc = None
+    if not rc:
+        try:
+            rc = actor.get_editor_property("root_component")
+        except Exception:
+            rc = None
+    if rc:
+        try:
+            return rc.get_component_transform()
+        except Exception:
+            pass
+    return actor.get_actor_transform()
+
+def _component_relative_transform(sc: unreal.SceneComponent) -> unreal.Transform:
+    try:
+        return sc.get_relative_transform()
+    except Exception:
+        try:
+            return unreal.Transform(
+                sc.get_relative_location(),
+                sc.get_relative_rotation().quaternion(),
+                sc.get_relative_scale3d()
+            )
+        except Exception:
+            return unreal.Transform()
+
+def _component_world_transform(sc: unreal.SceneComponent) -> unreal.Transform:
+    try:
+        return sc.get_component_transform()
+    except Exception:
+        a = sc.get_owner()
+        return _compose(_root_world_transform(a), _component_relative_transform(sc))
+
+SKIP_ACTOR_CLASSES = {"DatasmithSceneActor","LevelBounds","WorldDataLayers"}
+
+def _should_skip_actor(a: unreal.Actor) -> bool:
+    try:
+        return a.get_class().get_name() in SKIP_ACTOR_CLASSES
+    except Exception:
+        return False
+
+def _collect_targets():
+    ea = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    if ONLY_SELECTED:
+        sel = list(ea.get_selected_level_actors())
+        if INCLUDE_CHILDREN:
+            to_visit = sel[:]
+            all_set = set(sel)
+            while to_visit:
+                a = to_visit.pop()
+                for ch in a.get_attached_actors():
+                    if ch not in all_set:
+                        all_set.add(ch)
+                        to_visit.append(ch)
+            return list(all_set)
+        return sel
+    return list(ea.get_all_level_actors())
+
+def export_mesh_transforms_full(output_csv=OUTPUT_CSV):
+    _log(f"Starting export. CWD={os.getcwd()}")
+    actors = _collect_targets()
+    _log(f"Collected {len(actors)} actor(s). Target path: {os.path.abspath(os.path.expanduser(output_csv))}")
+
+    rows = []
+    for actor in actors:
+        if _should_skip_actor(actor):
+            continue
+
+        actor_name  = actor.get_name()
+        actor_class = actor.get_class().get_name()
+        try:
+            folder_path = actor.get_folder_path()
+        except Exception:
+            folder_path = ""
+
+        chain = " > ".join(_actor_chain(actor))
+        root_w = _root_world_transform(actor)
+
+        comps = []
+        comps += actor.get_components_by_class(unreal.StaticMeshComponent)
+        comps += actor.get_components_by_class(unreal.InstancedStaticMeshComponent)
+        comps += actor.get_components_by_class(unreal.HierarchicalInstancedStaticMeshComponent)
+
+        for comp in comps:
+            comp_name  = comp.get_name()
+            comp_class = comp.get_class().get_name()
+            try:
+                socket = comp.get_attach_socket_name() or ""
+            except Exception:
+                socket = ""
+
+            try:
+                mesh = comp.get_editor_property("static_mesh")
+            except Exception:
+                mesh = None
+            if not mesh and not LOG_EMPTY_STATIC_MESHES:
+                continue
+
+            mesh_name = mesh.get_name() if mesh else ""
+            mesh_path = _safe_path(mesh) if mesh else ""
+
+            comp_rel_tf   = _component_relative_transform(comp)
+            comp_world_tf = _component_world_transform(comp)
+
+            base_info = {
+                "Actor": actor_name,
+                "ActorClass": actor_class,
+                "ActorFolder": folder_path,
+                "AttachChain": chain,
+                "Component": comp_name,
+                "ComponentClass": comp_class,
+                "AttachSocket": str(socket),
+                "StaticMesh": mesh_name,
+                "MeshPath": mesh_path,
+            }
+            base_info.update(_as_trs_dict(root_w, "ACTOR_WORLD_"))
+            base_info.update(_as_trs_dict(comp_rel_tf, "COMP_REL_"))
+            base_info.update(_as_trs_dict(comp_world_tf, "COMP_WORLD_"))
+
+            if isinstance(comp, unreal.StaticMeshComponent) and not isinstance(
+                comp, (unreal.InstancedStaticMeshComponent, unreal.HierarchicalInstancedStaticMeshComponent)
+            ):
+                row = dict(base_info)
+                row["InstanceIndex"] = ""
+                for p in ["INST_LOCAL_", "INST_WORLD_"]:
+                    for s in ["LocX","LocY","LocZ","Pitch","Yaw","Roll","ScaleX","ScaleY","ScaleZ"]:
+                        row[p+s] = ""
+                rows.append(row)
+                continue
+
+            if isinstance(comp, (unreal.InstancedStaticMeshComponent, unreal.HierarchicalInstancedStaticMeshComponent)):
+                try:
+                    count = comp.get_instance_count()
+                except Exception:
+                    count = 0
+                for i in range(count):
+                    try:
+                        inst_local_tf = comp.get_instance_transform(i, world_space=False)
+                    except TypeError:
+                        inst_local_tf = comp.get_instance_transform(i, False)
+                    inst_world_tf = _compose(comp_world_tf, inst_local_tf)
+
+                    row = dict(base_info)
+                    row["InstanceIndex"] = i
+                    row.update(_as_trs_dict(inst_local_tf, "INST_LOCAL_"))
+                    row.update(_as_trs_dict(inst_world_tf, "INST_WORLD_"))
+                    rows.append(row)
+
+    _log(f"Prepared {len(rows)} row(s). Writing CSV…")
+
+    def _write_csv(path):
+        os.makedirs(os.path.dirname(os.path.expanduser(path)), exist_ok=True)
+        fieldnames = [
+            "Actor","ActorClass","ActorFolder","AttachChain",
+            "Component","ComponentClass","AttachSocket",
+            "StaticMesh","MeshPath",
+            "ACTOR_WORLD_LocX","ACTOR_WORLD_LocY","ACTOR_WORLD_LocZ",
+            "ACTOR_WORLD_Pitch","ACTOR_WORLD_Yaw","ACTOR_WORLD_Roll",
+            "ACTOR_WORLD_ScaleX","ACTOR_WORLD_ScaleY","ACTOR_WORLD_ScaleZ",
+            "COMP_REL_LocX","COMP_REL_LocY","COMP_REL_LocZ",
+            "COMP_REL_Pitch","COMP_REL_Yaw","COMP_REL_Roll",
+            "COMP_REL_ScaleX","COMP_REL_ScaleY","COMP_REL_ScaleZ",
+            "COMP_WORLD_LocX","COMP_WORLD_LocY","COMP_WORLD_LocZ",
+            "COMP_WORLD_Pitch","COMP_WORLD_Yaw","COMP_WORLD_Roll",
+            "COMP_WORLD_ScaleX","COMP_WORLD_ScaleY","COMP_WORLD_ScaleZ",
+            "InstanceIndex",
+            "INST_LOCAL_LocX","INST_LOCAL_LocY","INST_LOCAL_LocZ",
+            "INST_LOCAL_Pitch","INST_LOCAL_Yaw","INST_LOCAL_Roll",
+            "INST_LOCAL_ScaleX","INST_LOCAL_ScaleY","INST_LOCAL_ScaleZ",
+            "INST_WORLD_LocX","INST_WORLD_LocY","INST_WORLD_LocZ",
+            "INST_WORLD_Pitch","INST_WORLD_Yaw","INST_WORLD_Roll",
+            "INST_WORLD_ScaleX","INST_WORLD_ScaleY","INST_WORLD_ScaleZ",
+        ]
+        apath = os.path.abspath(os.path.expanduser(path))
+        with open(apath, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        return apath
+
+    # Attempt write to requested path
+    try:
+        apath = _write_csv(OUTPUT_CSV)
+        if os.path.exists(apath):
+            _log(f"Wrote {len(rows)} row(s) to {apath}")
+            return
+        else:
+            _log(f"Write reported OK but file not found at {apath}. Will try fallback.")
+    except Exception as e:
+        _log(f"Primary write failed: {e}. Trying fallback…")
+
+    # Fallback: project Saved/
+    fallback = os.path.join(unreal.SystemLibrary.get_project_saved_directory(), "mesh_transforms_full.csv")
+    try:
+        apath2 = _write_csv(fallback)
+        if os.path.exists(apath2):
+            _log(f"Wrote {len(rows)} row(s) to fallback: {apath2}")
+        else:
+            _log(f"Fallback write attempted but file not found at {apath2}")
+    except Exception as e2:
+        _log(f"Fallback write failed: {e2}")
+
+# ---- Run ----
+export_mesh_transforms_full(OUTPUT_CSV)
