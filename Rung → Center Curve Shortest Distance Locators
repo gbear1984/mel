@@ -1,53 +1,69 @@
 # ============================================================
 #  Rung → Center Curve Shortest Distance Locators
-#  Version: 4.0 (py2-safe)
+#  Version: 4.0 (py2-safe, commented)
 #  Date: 2025-11-05
 #
-#  Per rung (two-CV line segment):
-#    - Find u on center curve minimizing distance to the rung segment.
-#    - cp = point on curve, pr = closest point on the rung SEGMENT (clamped).
-#    - X = along rung, Y = normalize(pr - cp), Z = X × Y (re-orthonormalized).
-#    - Locator is placed at pr (on the rung), oriented to point at the curve.
+#  Summary:
+#    For every rung (a two-CV NURBS curve used like a straight segment),
+#    find the shortest connection to the center rail curve and orient a
+#    locator so that:
+#      X = along the rung,
+#      Y = from the center curve to the rung (shortest vector),
+#      Z = X × Y.
+#
+#  Method (per rung):
+#    1) Treat rung as a line SEGMENT between its endpoints (CV0 ↔ CV-1).
+#    2) Search curve parameter u ∈ [0,1] to minimize distance² between the
+#       curve point cp(u) and the CLOSEST POINT on the rung SEGMENT (clamped).
+#       - Coarse uniform scan to find a good bracket.
+#       - Golden-section refinement on a tiny interval around the best coarse u.
+#    3) Build an orthonormal frame (X, Y, Z) and place a big, red locator.
 #
 #  Notes:
-#    - No Δs, no stepping. Each rung solved independently with coarse scan + refine.
-#    - Python 2 compatible. Uses maya.cmds only.
+#    • Independent solve per rung: no marching, no Δs, no accumulation of error.
+#    • Uses maya.cmds only. Python 2 compatible (no f-strings, etc).
 # ============================================================
 
 import maya.cmds as cmds
 import math, re
 
 # ------------- USER SETTINGS -------------
-CENTER_CURVE            = 'Track_Center_Curve_01'
-SOURCE_GROUPS           = ['cross_members_GRP', 'cross_member_GRP']  # search order
-LOC_GROUP               = 'cross_member_locs_GRP'
+CENTER_CURVE            = 'Track_Center_Curve_01'    # main rail to project onto
+SOURCE_GROUPS           = ['cross_members_GRP', 'cross_member_GRP']  # search order for rungs
+LOC_GROUP               = 'cross_member_locs_GRP'    # parent for created locators
 
 # Search quality (bump for more accuracy, lower for speed)
-COARSE_SAMPLES          = 1200      # coarse scan of u in [0,1]
-REFINE_HALF_PCT         = 0.001     # ± window around the coarse best for golden refine
-GOLDEN_EVALS            = 60
+COARSE_SAMPLES          = 1200      # coarse scan resolution over u ∈ [0,1]
+REFINE_HALF_PCT         = 0.001     # refine in [u0±this] after coarse pass (as fraction of [0,1])
+GOLDEN_EVALS            = 60        # golden-section iterations (more = tighter minimum)
 
 # Visuals (via shape, no transform scaling)
 LOCATOR_SIZE_MULTIPLIER = 10.0
-LOCATOR_COLOR_RGB       = (1.0, 0.0, 0.0)
+LOCATOR_COLOR_RGB       = (1.0, 0.0, 0.0)  # red
 CREATE_DEBUG_NORMALS    = False     # True → draw a linear curve from cp→pr per rung
 # ----------------------------------------
 
 # ---------- vector helpers ----------
+# Small, allocation-friendly vector ops for lists-of-3 floats.
 def v_add(a,b):  return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]
 def v_sub(a,b):  return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]
 def v_dot(a,b):  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
 def v_len(a):    return math.sqrt(max(0.0, v_dot(a,a)))
 def v_norm(a, fb=(1,0,0)):
-    L=v_len(a);  return [a[0]/L, a[1]/L, a[2]/L] if L>1e-9 else list(fb)
+    """Normalize vector a; if too small, fall back to 'fb'."""
+    L = v_len(a)
+    return [a[0]/L, a[1]/L, a[2]/L] if L > 1e-9 else list(fb)
 def v_cross(a,b):
     return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]
 def v_mid(a,b):  return [(a[0]+b[0])*0.5,(a[1]+b[1])*0.5,(a[2]+b[2])*0.5]
 def v_d2(a,b):
-    dx,dy,dz=a[0]-b[0],a[1]-b[1],a[2]-b[2]; return dx*dx+dy*dy+dz*dz
+    """Squared distance (avoids sqrt until final)."""
+    dx,dy,dz = a[0]-b[0], a[1]-b[1], a[2]-b[2]
+    return dx*dx + dy*dy + dz*dz
 # -----------------------------------
 
 def _curve_shape(node):
+    """Return a nurbsCurve shape from a transform or the node itself if it's a curve."""
     if not cmds.objExists(node): return None
     if cmds.nodeType(node) == 'nurbsCurve': return node
     shapes = cmds.listRelatives(node, s=True, ni=True, f=False) or []
@@ -56,62 +72,94 @@ def _curve_shape(node):
     return None
 
 def _endpoints(shape):
+    """Get world-space endpoints (CV0, CV-1) of a nurbsCurve shape."""
     cvs = cmds.ls(shape + '.cv[*]', fl=True) or []
     if len(cvs) < 2: return None, None
     return cmds.pointPosition(cvs[0], w=True), cmds.pointPosition(cvs[-1], w=True)
 
 def _ensure_group(name):
+    """Create (or validate) a transform group by name."""
     if cmds.objExists(name):
         if cmds.nodeType(name) != 'transform':
             raise RuntimeError("'%s' exists but is not a transform" % name)
         return name
     return cmds.group(em=True, n=name)
 
-def _clamp01(x): return 0.0 if x<0.0 else (1.0 if x>1.0 else x)
+def _clamp01(x):
+    """Clamp scalar into [0,1] domain (curve param percentages)."""
+    return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
 
-def p_on(curve, t): return cmds.pointOnCurve(curve, pr=_clamp01(t), p=True, top=True)
+def p_on(curve, t):
+    """Evaluate world-space point on curve at normalized param t ∈ [0,1]."""
+    return cmds.pointOnCurve(curve, pr=_clamp01(t), p=True, top=True)
 
-# Closest point on segment AB to Q (clamped to segment, not infinite line)
+# Closest point on segment AB to Q (clamped to the finite segment)
 def closest_on_segment(q, a, b):
-    ab = v_sub(b,a)
-    ab2 = v_dot(ab,ab)
+    """
+    Project q to the segment a→b; clamp to endpoints.
+    Returns pr (closest point on the segment).
+    """
+    ab  = v_sub(b, a)
+    ab2 = v_dot(ab, ab)
     if ab2 < 1e-12:
-        return list(a)  # degenerate segment
-    t = v_dot(v_sub(q,a), ab) / ab2
+        # Degenerate segment: return endpoint 'a'
+        return list(a)
+    t = v_dot(v_sub(q, a), ab) / ab2  # scalar projection on infinite line
     if t < 0.0: t = 0.0
     elif t > 1.0: t = 1.0
     return [a[0] + ab[0]*t, a[1] + ab[1]*t, a[2] + ab[2]*t]
 
-# Distance^2 objective at parameter u
+# Distance² objective between curve point cp(u) and segment AB
 def dist2_curve_to_segment(u, curve, a, b):
+    """
+    For a given u on 'curve', compute:
+      cp = curve point,
+      pr = closest point on rung segment [a,b],
+      return (||cp-pr||², cp, pr).
+    """
     cp = p_on(curve, u)
     pr = closest_on_segment(cp, a, b)
     return v_d2(cp, pr), cp, pr
 
-# Golden-section minimize on [lo,hi] for distance^2
+# Golden-section minimize distance² on a tiny bracket around u0
 def golden_min(curve, a, b, lo, hi, evals):
-    phi = 0.5*(math.sqrt(5.0)-1.0)
-    A = _clamp01(min(lo,hi)); B = _clamp01(max(lo,hi))
+    """
+    Minimize distance²(curve(u), segment[a,b]) on u ∈ [lo,hi] using
+    golden-section search (unimodal function, derivative-free).
+    Returns: (min_d2, u_best, cp_best, pr_best).
+    """
+    phi = 0.5 * (math.sqrt(5.0) - 1.0)
+    A = _clamp01(min(lo, hi))
+    B = _clamp01(max(lo, hi))
     def f(t): return dist2_curve_to_segment(_clamp01(t), curve, a, b)
-    c = B - phi*(B-A); d = A + phi*(B-A)
+
+    c = B - phi * (B - A)
+    d = A + phi * (B - A)
     fc, c_cp, c_pr = f(c)
     fd, d_cp, d_pr = f(d)
     best = (fc, c, c_cp, c_pr) if fc < fd else (fd, d, d_cp, d_pr)
+
     for _ in range(max(10, evals)):
         if fc < fd:
             B, d, fd, d_cp, d_pr = d, c, fc, c_cp, c_pr
-            c = B - phi*(B-A); fc, c_cp, c_pr = f(c)
-            if fc < best[0]: best = (fc, c, c_cp, c_pr)
+            c = B - phi * (B - A)
+            fc, c_cp, c_pr = f(c)
+            if fc < best[0]:
+                best = (fc, c, c_cp, c_pr)
         else:
             A, c, fc, c_cp, c_pr = c, d, fd, d_cp, d_pr
-            d = A + phi*(B-A); fd, d_cp, d_pr = f(d)
-            if fd < best[0]: best = (fd, d, d_cp, d_pr)
-        if (B - A) < 1e-10: break
+            d = A + phi * (B - A)
+            fd, d_cp, d_pr = f(d)
+            if fd < best[0]:
+                best = (fd, d, d_cp, d_pr)
+        if (B - A) < 1e-10:  # tiny bracket → done
+            break
     return best  # (d2, u, cp, pr)
 
 # Natural numeric sort for names (..._00 < ..._01 < ..._10)
 _num_re = re.compile(r'(\d+)')
 def natural_key(s):
+    """Split name into alpha/number parts so '..._10' sorts after '..._9'."""
     parts = _num_re.split(s.split('|')[-1])
     return [int(p) if p.isdigit() else p.lower() for p in parts]
 
@@ -120,14 +168,18 @@ center = _curve_shape(CENTER_CURVE) if cmds.objExists(CENTER_CURVE) else None
 if not center:
     raise RuntimeError("Center curve '%s' not found" % CENTER_CURVE)
 
+# find the first existing source group in the list
 src_grp = next((g for g in SOURCE_GROUPS if cmds.objExists(g)), None)
 if not src_grp:
     raise RuntimeError("Couldn't find any of %s" % SOURCE_GROUPS)
 
+# collect all transforms under the group that actually carry a nurbsCurve shape
 children = cmds.listRelatives(src_grp, c=True, ad=True, type='transform') or []
 rungs = [x for x in children if _curve_shape(x)]
 if not rungs:
     raise RuntimeError("No nurbsCurve transforms under '%s'" % src_grp)
+
+# make ordering stable and human-natural (…_00, …_01, …_10, …)
 rungs = sorted(set(rungs), key=natural_key)
 
 loc_grp = _ensure_group(LOC_GROUP)
@@ -137,39 +189,51 @@ made = []
 for tr in rungs:
     shp = _curve_shape(tr)
     p0, p1 = _endpoints(shp)
-    if not p0 or not p1: continue
-
-    seg_vec = v_sub(p1, p0)
-    if v_len(seg_vec) < 1e-6:  # degenerate rung
+    if not p0 or not p1:
+        # skip curves that don't have 2+ CVs
         continue
+
+    # Treat rung as a straight segment between its endpoints.
+    seg_vec = v_sub(p1, p0)
+    if v_len(seg_vec) < 1e-6:
+        # Degenerate/zero length — nothing to do
+        continue
+
+    # Build X axis = along the rung (end → end).
     X = v_norm(seg_vec, (1,0,0))
 
-    # coarse scan
-    best = (1e99, 0.5, p_on(center, 0.5), closest_on_segment(p_on(center,0.5), p0, p1))
+    # ---- Step 1: coarse scan over u ∈ [0,1] to find a good candidate ----
+    # Start with something sensible in case the loop never improves it.
+    best = (1e99, 0.5, p_on(center, 0.5), closest_on_segment(p_on(center, 0.5), p0, p1))
     for i in range(COARSE_SAMPLES + 1):
-        u = i / float(COARSE_SAMPLES)
+        u = i / float(COARSE_SAMPLES)  # normalized parameter
         d2, cp, pr = dist2_curve_to_segment(u, center, p0, p1)
         if d2 < best[0]:
             best = (d2, u, cp, pr)
 
-    # refine around the coarse best
+    # ---- Step 2: refine locally around the best coarse u with golden-section ----
     u0 = best[1]
     lo = _clamp01(u0 - REFINE_HALF_PCT)
     hi = _clamp01(u0 + REFINE_HALF_PCT)
     d2, u_best, cp, pr = golden_min(center, p0, p1, lo, hi, GOLDEN_EVALS)
 
-    # axes: Y points from curve to rung (shortest), X along rung, Z = X × Y
+    # ---- Step 3: build a clean orthonormal frame ----
+    # Y points from curve to rung along the shortest path (the "purple normal").
     Y_raw = v_sub(pr, cp)
     if v_len(Y_raw) < 1e-9:
-        # fallback: use world up if somehow coincident
-        Y = [0,1,0]
+        # Extremely rare: curve point projects exactly onto a rung endpoint.
+        # Pick a safe world-up to avoid NaNs and continue.
+        Y = [0, 1, 0]
     else:
         Y = v_norm(Y_raw, (0,1,0))
-    Z = v_norm(v_cross(X, Y), (0,0,1))
-    Y = v_norm(v_cross(Z, X), (0,1,0))  # re-orthonormalize
 
-    # place locator at the rung hit point (pr)
+    # Z completes the right-handed frame; re-orthonormalize Y to remove drift.
+    Z = v_norm(v_cross(X, Y), (0,0,1))
+    Y = v_norm(v_cross(Z, X), (0,1,0))
+
+    # ---- Step 4: create locator at the rung hit point (pr), oriented by [X Y Z] ----
     loc = cmds.spaceLocator(n=tr.split('|')[-1] + '_LOC')[0]
+    # Build a row-major 4×4 matrix from basis + position (no scale).
     m = [
         X[0], X[1], X[2], 0.0,
         Y[0], Y[1], Y[2], 0.0,
@@ -180,12 +244,12 @@ for tr in rungs:
     cmds.parent(loc, loc_grp)
     made.append(loc)
 
+    # Optional: draw the purple shortest segment for QC (cp → pr).
     if CREATE_DEBUG_NORMALS:
-        # draw the shortest segment as a linear curve (cp -> pr)
         dbg = cmds.curve(d=1, p=[cp, pr], n=tr.split('|')[-1] + '_shortest_CRV')
         cmds.parent(dbg, loc_grp)
 
-# visuals
+# ---- Style the locators (shape-only scale and color) ----
 for loc in made:
     shp_nodes = cmds.listRelatives(loc, s=True, ni=True, f=True) or []
     for shpNode in shp_nodes:
@@ -198,6 +262,7 @@ for loc in made:
             r,g,b = LOCATOR_COLOR_RGB
             cmds.setAttr(shpNode + ".overrideColorRGB", r, g, b)
 
+# Final selection for convenience.
 cmds.select(made, r=True)
 print("Created %d locators under '%s' (shortest distance: rung segment ↔ center curve)"
       % (len(made), LOC_GROUP))
